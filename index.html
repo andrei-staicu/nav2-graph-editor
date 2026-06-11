@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph editor · SAS · Annotate route graphs on ROS maps</title>
+<meta name="description" content="A lightweight browser-based editor for annotating route graphs on top of ROS occupancy grid maps. Built for Nav2 route servers as part of the Semantic Autonomy Stack.">
+<meta name="author" content="STAICU Andrei-Alexandru">
+<meta name="keywords" content="ROS, Nav2, route graph, occupancy grid, robotics, autonomous navigation, SAS, semantic autonomy stack">
+
+<!-- Open Graph -->
+<meta property="og:title" content="Graph editor for ROS route graphs">
+<meta property="og:description" content="Annotate route nodes and edges on top of a ROS occupancy map. Exports Nav2-compatible GeoJSON.">
+<meta property="og:image" content="assets/sas-logo.png">
+<meta property="og:type" content="website">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Graph editor · SAS">
+<meta name="twitter:description" content="Annotate route graphs on ROS maps. Built for Nav2 and the Semantic Autonomy Stack.">
+<meta name="twitter:image" content="assets/sas-logo.png">
+
+<link rel="icon" type="image/png" href="assets/sas-logo.png">
+<link rel="apple-touch-icon" href="assets/sas-logo.png">
+<style>
+  :root {
+    /* Anthropic palette */
+    --bg: #F0EEE6;
+    --surface: #FAF9F5;
+    --surface-elevated: #FFFFFF;
+    --surface-muted: #E8E6DC;
+    --border: rgba(20, 20, 19, 0.08);
+    --border-strong: rgba(20, 20, 19, 0.16);
+    --text: #141413;
+    --text-muted: #6B6B6B;
+    --text-subtle: #93918A;
+    --accent: #C96442;
+    --accent-hover: #B85636;
+    --accent-bg: #F5E9E3;
+    --danger: #B85436;
+    --serif: ui-serif, "Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
+    /* node kinds */
+    --start: #5A7D3A;
+    --start-bg: #DFE7CC;
+    --goal: #B85436;
+    --goal-bg: #F0DAD0;
+    --waypoint: #4A6D8C;
+    --waypoint-bg: #D4DEE7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+
+  header { margin-bottom: 24px; }
+  h1 {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    color: var(--text);
+  }
+  .subtitle {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .logo {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+  }
+  .brand-text h1 { margin: 0 0 2px; }
+  .brand-text .subtitle { font-size: 13px; }
+  .header-nav { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-radius: 8px;
+    transition: all 0.15s;
+    font-weight: 450;
+  }
+  .nav-link:hover { color: var(--text); background: var(--surface-muted); }
+  .nav-link.github-link {
+    background: var(--text);
+    color: var(--surface);
+  }
+  .nav-link.github-link:hover { background: #2a2a28; color: var(--surface); }
+
+  button, input[type="text"], input[type="number"], select {
+    font-family: inherit;
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    transition: all 0.15s ease;
+  }
+  button { cursor: pointer; font-weight: 450; }
+  button:hover { background: var(--surface-muted); border-color: var(--border-strong); }
+  button:active { transform: translateY(0.5px); }
+  button.primary {
+    background: var(--accent);
+    color: var(--surface-elevated);
+    border-color: var(--accent);
+  }
+  button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button.danger { color: var(--danger); }
+  button.danger:hover { background: #F5E2DC; border-color: #E0B8A8; }
+
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    background: var(--surface-muted);
+    height: 4px;
+    border-radius: 2px;
+  }
+  input[type="range"]::-moz-range-track {
+    background: var(--surface-muted);
+    height: 4px;
+    border-radius: 2px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    margin-top: -6px;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    align-items: center;
+    padding: 12px;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .label-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s ease;
+    color: var(--text);
+  }
+  .label-btn:hover { background: var(--surface-muted); border-color: var(--border-strong); }
+  .label-btn input[type="file"] { display: none; }
+  .toolbar-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--border-strong);
+    margin: 0 4px;
+  }
+
+  .mode-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: var(--surface-elevated);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .mode-bar > span.label { color: var(--text-subtle); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .mode-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+  }
+  .mode-btn:hover { background: var(--surface-muted); color: var(--text); }
+  .mode-btn.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: rgba(201, 100, 66, 0.18);
+  }
+  .mode-btn.active:hover { background: var(--accent-bg); }
+  .spacer { margin-left: auto; }
+  .status-pill {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    background: var(--surface);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 12px;
+    align-items: start;
+  }
+  .canvas-wrap {
+    position: relative;
+    background: var(--surface-elevated);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  svg#editor {
+    display: block;
+    width: 100%;
+    height: 640px;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(20,20,19,0.04) 1px, transparent 0) 0 0 / 24px 24px,
+      var(--surface);
+    cursor: crosshair;
+    user-select: none;
+  }
+
+  .info-overlay {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-muted);
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+  }
+
+  .zoom-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12px;
+    min-width: 200px;
+    backdrop-filter: blur(8px);
+  }
+  .zoom-overlay label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .zoom-overlay label span { color: var(--text); font-family: ui-monospace, Menlo, monospace; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .zoom-overlay .row { display: flex; gap: 6px; margin-top: 10px; }
+  .zoom-overlay button { padding: 5px 10px; font-size: 11px; flex: 1; }
+  .zoom-overlay .divider { height: 1px; background: var(--border); margin: 12px 0 4px; }
+
+  .panel {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 18px 14px;
+    min-height: 640px;
+    font-size: 13px;
+    max-height: 640px;
+    overflow-y: auto;
+  }
+  .panel::-webkit-scrollbar { width: 6px; }
+  .panel::-webkit-scrollbar-track { background: transparent; }
+  .panel::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+  .panel-empty {
+    color: var(--text-subtle);
+    font-size: 13px;
+    text-align: center;
+    padding: 3rem 1rem;
+    font-family: var(--serif);
+    font-style: italic;
+  }
+  .panel-empty-icon {
+    display: block;
+    margin: 0 auto 12px;
+    width: 32px;
+    height: 32px;
+    opacity: 0.3;
+  }
+
+  .panel h4 {
+    margin: 0 0 12px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .panel .node-title {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--text);
+    margin-bottom: 14px;
+    letter-spacing: -0.01em;
+  }
+  .panel .node-title-sub {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-left: 8px;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+  .panel-section {
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-section:last-child { border-bottom: none; }
+
+  .prop-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .prop-row label {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 78px;
+    font-weight: 450;
+  }
+  .prop-row input, .prop-row select {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 12px;
+    background: var(--surface);
+  }
+
+  .meta-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .meta-row input { flex: 1; padding: 5px 8px; font-size: 11px; background: var(--surface); }
+  .meta-row button {
+    padding: 5px 9px;
+    font-size: 13px;
+    color: var(--text-subtle);
+    background: transparent;
+    border: 1px solid transparent;
+    line-height: 1;
+  }
+  .meta-row button:hover { color: var(--danger); background: transparent; border-color: transparent; }
+
+  .small-btn { padding: 5px 10px; font-size: 11px; }
+  .full-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px;
+    font-size: 12px;
+    background: var(--surface);
+  }
+  .full-btn.subtle { color: var(--text-muted); background: transparent; border: 1px dashed var(--border-strong); }
+  .full-btn.subtle:hover { background: var(--surface-muted); border-style: solid; }
+
+  .edge-list { font-size: 12px; }
+  .edge-list-item {
+    padding: 6px 8px;
+    cursor: pointer;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    margin-bottom: 2px;
+    transition: all 0.12s;
+  }
+  .edge-list-item:hover { background: var(--surface-muted); color: var(--text); }
+
+  .hint {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+  .hint code {
+    background: var(--surface-elevated);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .hint strong { color: var(--text); font-weight: 500; }
+  .hint-row { display: flex; gap: 24px; flex-wrap: wrap; }
+  .hint-row > div { flex: 1; min-width: 260px; }
+
+  /* svg classes */
+  .node-circle {
+    fill: var(--surface-elevated);
+    stroke: #6B6B6B;
+    stroke-width: 1.8;
+    cursor: grab;
+    transition: stroke-width 0.12s ease;
+  }
+  .node-circle.start { fill: var(--start-bg); stroke: var(--start); }
+  .node-circle.goal { fill: var(--goal-bg); stroke: var(--goal); }
+  .node-circle.waypoint { fill: var(--waypoint-bg); stroke: var(--waypoint); }
+  .node-circle:hover { stroke-width: 2.5; }
+  .node-circle.selected {
+    stroke: var(--accent);
+    stroke-width: 2.5;
+  }
+  .node-halo {
+    fill: var(--accent);
+    fill-opacity: 0.12;
+    pointer-events: none;
+  }
+  .node-label {
+    font-size: 11px;
+    fill: var(--text);
+    pointer-events: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 500;
+  }
+  .edge-line {
+    stroke: #6B6B6B;
+    stroke-width: 1.5;
+    fill: none;
+    cursor: pointer;
+    transition: stroke 0.12s ease, stroke-width 0.12s ease;
+  }
+  .edge-line:hover { stroke: var(--accent); stroke-width: 2; }
+  .edge-line.selected { stroke: var(--accent); stroke-width: 2; }
+  .edge-hit { stroke: transparent; stroke-width: 16; fill: none; cursor: pointer; }
+
+  /* node and edge appearance transitions handled by CSS hover, no entrance animation
+     (entrance fade caused flicker during drag since redraw recreates DOM each frame) */
+
+  /* legend */
+  .legend {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 14px;
+    backdrop-filter: blur(8px);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid; }
+  .legend-dot.start { background: var(--start-bg); border-color: var(--start); }
+  .legend-dot.goal { background: var(--goal-bg); border-color: var(--goal); }
+  .legend-dot.waypoint { background: var(--waypoint-bg); border-color: var(--waypoint); }
+  .legend-dot.regular { background: var(--surface-elevated); border-color: #6B6B6B; }
+
+  /* About + Foundation sections */
+  .info-section {
+    margin-top: 56px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+  .info-section h2 {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    margin: 0 0 16px;
+    color: var(--text);
+  }
+  .info-section p {
+    color: var(--text-muted);
+    line-height: 1.7;
+    font-size: 14px;
+    max-width: 720px;
+    margin: 0 0 14px;
+  }
+  .info-section p code {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--text);
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 24px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 18px 16px;
+  }
+  .feature-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .feature-card h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .feature-card p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .paper-list {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 24px;
+    border-left: 2px solid var(--accent);
+  }
+  .paper-list li {
+    padding: 8px 0 8px 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .paper-list a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .paper-list a:hover { text-decoration: underline; }
+  .paper-list .paper-meta {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .credits {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .credit-block { display: flex; flex-direction: column; gap: 3px; }
+  .credit-label {
+    font-size: 11px;
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .credit-value {
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 450;
+  }
+
+  .site-footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-subtle);
+  }
+  .footer-left, .footer-right { display: flex; align-items: center; gap: 10px; }
+  .footer-logo {
+    width: 24px;
+    height: 24px;
+  }
+  .footer-sep { opacity: 0.5; }
+  .site-footer a { color: var(--text-muted); text-decoration: none; }
+  .site-footer a:hover { color: var(--accent); text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="container">
+  <header class="site-header">
+    <div class="brand">
+      <img src="assets/sas-logo.png" alt="SAS logo" class="logo">
+      <div class="brand-text">
+        <h1>Graph editor</h1>
+        <p class="subtitle">Annotate route nodes and edges on top of a ROS occupancy map</p>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <a href="#about" class="nav-link">About</a>
+      <a href="#foundation" class="nav-link">Foundation</a>
+      <a href="https://github.com/andrei-staicu/nav2-graph-editor" class="nav-link github-link" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </header>
+
+  <div class="toolbar">
+    <label class="label-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      <span>Load .pgm</span>
+      <input type="file" id="pgm-input" accept=".pgm,image/x-portable-graymap">
+    </label>
+    <label class="label-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+      <span>Load .yaml</span>
+      <input type="file" id="yaml-input" accept=".yaml,.yml">
+    </label>
+    <div class="toolbar-divider"></div>
+    <label class="label-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <span>Import GeoJSON</span>
+      <input type="file" id="geojson-input" accept=".json,.geojson">
+    </label>
+    <button id="export-btn" class="primary">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export GeoJSON
+    </button>
+    <div class="spacer"></div>
+    <button id="reset-view-btn">Reset view</button>
+    <button id="clear-btn" class="danger">Clear all</button>
+  </div>
+
+  <div class="mode-bar">
+    <span class="label">Tool</span>
+    <button class="mode-btn" data-mode="select">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+      Select
+    </button>
+    <button class="mode-btn" data-mode="add-node">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      Add node
+    </button>
+    <button class="mode-btn" data-mode="add-edge">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><circle cx="5" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7 7l10 10"/></svg>
+      Add edge
+    </button>
+    <div class="spacer"></div>
+    <span class="status-pill" id="status-text">Ready</span>
+  </div>
+
+  <div class="layout">
+    <div class="canvas-wrap">
+      <svg id="editor" viewBox="0 0 700 640">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#6B6B6B"/>
+          </marker>
+          <marker id="arrow-sel" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#C96442"/>
+          </marker>
+          <marker id="arrow-start" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#6B6B6B"/>
+          </marker>
+          <marker id="arrow-start-sel" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#C96442"/>
+          </marker>
+        </defs>
+        <image id="map-img" x="0" y="0" width="0" height="0" preserveAspectRatio="none" opacity="0.7"/>
+        <g id="frame-helpers"></g>
+        <g id="edges-layer" class="edges-layer"></g>
+        <g id="nodes-layer" class="nodes-layer"></g>
+      </svg>
+      <div class="info-overlay" id="info-overlay">no map loaded</div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot regular"></span>regular</div>
+        <div class="legend-item"><span class="legend-dot start"></span>start</div>
+        <div class="legend-item"><span class="legend-dot goal"></span>goal</div>
+        <div class="legend-item"><span class="legend-dot waypoint"></span>waypoint</div>
+      </div>
+      <div class="zoom-overlay">
+        <label>Zoom <span id="zoom-val">100%</span></label>
+        <input type="range" id="zoom-slider" min="10" max="800" value="100">
+        <div class="row">
+          <button id="fit-map-btn">Fit map</button>
+          <button id="fit-graph-btn">Fit graph</button>
+        </div>
+        <div class="divider"></div>
+        <label>Node radius <span id="radius-val">0.15 m</span></label>
+        <input type="range" id="radius-slider" min="0.02" max="2" step="0.01" value="0.15">
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-empty" id="panel-empty">
+        <svg class="panel-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Select a node or edge<br>to edit its properties.
+      </div>
+      <div id="panel-content" style="display: none;"></div>
+    </div>
+  </div>
+
+  <div class="hint">
+    <div class="hint-row">
+      <div>
+        <strong>Keyboard</strong><br>
+        <code>N</code> add node &nbsp; <code>E</code> add edge &nbsp; <code>V</code> select<br>
+        <code>Del</code> remove selection &nbsp; <code>Esc</code> cancel
+      </div>
+      <div>
+        <strong>Mouse</strong><br>
+        Drag nodes to move (edges follow).<br>
+        Scroll to zoom &nbsp; <code>Shift</code>+drag or middle-click to pan.
+      </div>
+    </div>
+  </div>
+
+  <section id="about" class="info-section">
+    <h2>About</h2>
+    <p>
+      A lightweight, dependency-free editor for annotating route graphs on top of
+      ROS occupancy grid maps. Designed for navigation pipelines built on Nav2 that
+      require semantic route information beyond raw costmap planning: nodes with
+      types (start, goal, waypoints), directed and bidirectional edges, and
+      arbitrary per-edge metadata such as penalties or speed limits.
+    </p>
+    <p>
+      Everything runs locally in the browser. The editor parses
+      <code>.pgm</code> map images and <code>.yaml</code> map metadata natively,
+      respecting the standard ROS conventions (resolution, origin, bottom-left
+      image anchoring). The output is a GeoJSON file in EPSG:3857 that drops
+      directly into Nav2 route servers and similar planners.
+    </p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⊕</div>
+        <h3>Visual annotation</h3>
+        <p>Place nodes and draw edges directly on top of your map. Drag to move, edges follow.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⇄</div>
+        <h3>Directed graphs</h3>
+        <p>Bidirectional by default, switch any edge to unidirectional and flip its direction with one click.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⌘</div>
+        <h3>Rich metadata</h3>
+        <p>Edit per-edge cost, penalty, speed limits, or any custom key-value pair your planner needs.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⇆</div>
+        <h3>Round-trip GeoJSON</h3>
+        <p>Import existing graphs, edit, export in a stable format compatible with Nav2 route servers.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="foundation" class="info-section">
+    <h2>Foundation</h2>
+    <p>
+      This editor is a tool built in support of the
+      <strong>Semantic Autonomy Stack (SAS)</strong>, a layered architecture for
+      mobile robot autonomy combining geometric navigation with semantic memory
+      and language-based reasoning. SAS is the subject of two open-access
+      publications:
+    </p>
+    <ul class="paper-list">
+      <li>
+        <a href="https://www.mdpi.com/1424-8220/26/7/2232" target="_blank" rel="noopener">
+          <strong>MDPI Sensors</strong>
+        </a>
+        <span class="paper-meta">Angular Sector Fusion and semantic route planning for autonomous mobile robots</span>
+      </li>
+      <li>
+        <a href="https://arxiv.org/abs/2605.02525" target="_blank" rel="noopener">
+          <strong>arXiv:2605.02525</strong>
+        </a>
+        <span class="paper-meta">Cross-robot semantic memory transfer experiments in the SAS framework</span>
+      </li>
+    </ul>
+    <div class="credits">
+      <div class="credit-block">
+        <span class="credit-label">Author</span>
+        <span class="credit-value">STAICU Andrei-Alexandru</span>
+      </div>
+      <div class="credit-block">
+        <span class="credit-label">Thesis coordinator</span>
+        <span class="credit-value">Conf. dr. ing. ABAZA Bogdan-Felician</span>
+      </div>
+      <div class="credit-block">
+        <span class="credit-label">Affiliation</span>
+        <span class="credit-value">National University of Science and Technology Politehnica Bucharest, FIIR</span>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="footer-left">
+      <img src="assets/sas-logo.png" alt="" class="footer-logo">
+      <span>Part of the Semantic Autonomy Stack</span>
+    </div>
+    <div class="footer-right">
+      <span>MIT License</span>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/andrei-staicu/nav2-graph-editor" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+  </footer>
+  </div>
+
+<script>
+(function(){
+  const svg = document.getElementById('editor');
+  const edgesLayer = document.getElementById('edges-layer');
+  const nodesLayer = document.getElementById('nodes-layer');
+  const mapImg = document.getElementById('map-img');
+  const infoOverlay = document.getElementById('info-overlay');
+  const panelEmpty = document.getElementById('panel-empty');
+  const panelContent = document.getElementById('panel-content');
+  const statusText = document.getElementById('status-text');
+  const zoomSlider = document.getElementById('zoom-slider');
+  const zoomVal = document.getElementById('zoom-val');
+  const radiusSlider = document.getElementById('radius-slider');
+  const radiusVal = document.getElementById('radius-val');
+
+  const VIEW_W = 700, VIEW_H = 640;
+  const PX_PER_M_BASE = 50;
+
+  const state = {
+    nodes: new Map(),
+    edges: new Map(),
+    nextNodeId: 0,
+    nextEdgeId: 10,
+    selection: null,
+    mode: 'select',
+    pendingEdgeStart: null,
+
+    mapMeta: null,
+    mapDataUrl: null,
+    imgW: 0,
+    imgH: 0,
+
+    // viewport in svg user units (which equal map-meters * mapScale + pan)
+    // we maintain: zoom (1.0 = base scale), panX/panY = top-left of view in map-meters * baseScale
+    zoom: 1.0,
+    panX: -200,
+    panY: -300,
+
+    nodeRadiusM: 0.15,
+  };
+
+  // === coord conversions ===
+  // Always: 1 map-meter = PX_PER_M_BASE * zoom view units.
+  // When a map image is loaded, the image is drawn at its native resolution (imgW x imgH in map-meters / mapMeta.resolution),
+  // so we treat the image as being at scale (1 image px = resolution m). We render it scaled by (PX_PER_M_BASE * zoom * resolution).
+  function pxPerMeter() {
+    return PX_PER_M_BASE * state.zoom;
+  }
+
+  function mapToView(mx, my) {
+    const s = pxPerMeter();
+    // y in map frame is up-positive; svg y is down-positive
+    const vx = mx * s - state.panX;
+    const vy = -my * s - state.panY;
+    return [vx, vy];
+  }
+  function viewToMap(vx, vy) {
+    const s = pxPerMeter();
+    const mx = (vx + state.panX) / s;
+    const my = -(vy + state.panY) / s;
+    return [mx, my];
+  }
+  function clientToView(evt) {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return [0,0];
+    const p = pt.matrixTransform(ctm.inverse());
+    return [p.x, p.y];
+  }
+  function clientToMap(evt) {
+    const [vx, vy] = clientToView(evt);
+    return viewToMap(vx, vy);
+  }
+
+  function updateMapImage() {
+    if (!state.mapDataUrl || !state.mapMeta) return;
+    const res = state.mapMeta.resolution;
+    const s = pxPerMeter();
+    // image native: imgW pixels wide, each pixel = res meters
+    // so image width in view units = imgW * res * s
+    const widthView = state.imgW * res * s;
+    const heightView = state.imgH * res * s;
+    // top-left of image in map frame: (originX, originY + imgH*res)  [origin is bottom-left in ROS]
+    const [tlx, tly] = mapToView(state.mapMeta.originX, state.mapMeta.originY + state.imgH * res);
+    mapImg.setAttribute('x', tlx);
+    mapImg.setAttribute('y', tly);
+    mapImg.setAttribute('width', widthView);
+    mapImg.setAttribute('height', heightView);
+  }
+
+  function updateZoomUI() {
+    zoomVal.textContent = Math.round(state.zoom * 100) + '%';
+    if (parseInt(zoomSlider.value) !== Math.round(state.zoom * 100)) {
+      zoomSlider.value = Math.round(state.zoom * 100);
+    }
+  }
+
+  // === yaml (minimal) ===
+  function parseYaml(text) {
+    const out = {};
+    const lines = text.split(/\r?\n/);
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      // skip blank lines and pure comments
+      if (/^\s*(#.*)?$/.test(line)) { i++; continue; }
+      // key: value-or-empty
+      const m = line.match(/^\s*([a-zA-Z_][\w]*)\s*:\s*(.*)$/);
+      if (!m) { i++; continue; }
+      const k = m[1];
+      let v = m[2].replace(/#.*$/, '').trim();
+      if (v === '') {
+        // value continues on next lines as a YAML block list ("  - item")
+        const items = [];
+        let j = i + 1;
+        while (j < lines.length) {
+          const itemMatch = lines[j].match(/^\s+-\s*(.+?)\s*$/);
+          if (!itemMatch) break;
+          let iv = itemMatch[1].replace(/#.*$/, '').trim();
+          const num = parseFloat(iv);
+          items.push(isNaN(num) ? iv : num);
+          j++;
+        }
+        if (items.length > 0) {
+          out[k] = items;
+          i = j;
+          continue;
+        }
+        // empty key with no list - skip
+        i++; continue;
+      }
+      if (v.startsWith('[')) {
+        v = v.replace(/^\[|\]$/g, '').split(',').map(s => {
+          const t = s.trim();
+          const n = parseFloat(t);
+          return isNaN(n) ? t : n;
+        });
+      } else if (!isNaN(parseFloat(v)) && /^-?\d/.test(v)) {
+        v = parseFloat(v);
+      }
+      out[k] = v;
+      i++;
+    }
+    return out;
+  }
+
+  // === pgm (P5 binary or P2 ascii) ===
+  function parsePGM(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let i = 0;
+    function readToken() {
+      while (i < bytes.length) {
+        const c = bytes[i];
+        if (c === 0x23) {
+          while (i < bytes.length && bytes[i] !== 0x0a) i++;
+        } else if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) {
+          i++;
+        } else break;
+      }
+      let start = i;
+      while (i < bytes.length) {
+        const c = bytes[i];
+        if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) break;
+        i++;
+      }
+      return new TextDecoder().decode(bytes.slice(start, i));
+    }
+    const magic = readToken();
+    const w = parseInt(readToken(), 10);
+    const h = parseInt(readToken(), 10);
+    const maxv = parseInt(readToken(), 10);
+    i++; // single whitespace after maxv
+    const pixels = new Uint8ClampedArray(w * h * 4);
+    if (magic === 'P5') {
+      const scale = 255 / maxv;
+      for (let p = 0; p < w * h; p++) {
+        const g = Math.round(bytes[i + p] * scale);
+        pixels[p*4] = g; pixels[p*4+1] = g; pixels[p*4+2] = g; pixels[p*4+3] = 255;
+      }
+    } else if (magic === 'P2') {
+      const rest = new TextDecoder().decode(bytes.slice(i)).split(/\s+/).filter(Boolean);
+      const scale = 255 / maxv;
+      for (let p = 0; p < w * h; p++) {
+        const g = Math.round(parseInt(rest[p], 10) * scale);
+        pixels[p*4] = g; pixels[p*4+1] = g; pixels[p*4+2] = g; pixels[p*4+3] = 255;
+      }
+    } else {
+      throw new Error('Unsupported PGM format: ' + magic);
+    }
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.putImageData(new ImageData(pixels, w, h), 0, 0);
+    return { dataUrl: cv.toDataURL('image/png'), width: w, height: h };
+  }
+
+  // === drawing ===
+  function redraw() {
+    updateMapImage();
+    drawEdges();
+    drawNodes();
+  }
+
+  // pair edges by unordered node pair; if both directions exist, render as bidirectional (one line, two arrows)
+  function pairEdges() {
+    const seen = new Map(); // key -> {forward, reverse}
+    state.edges.forEach(e => {
+      const key = [e.startid, e.endid].sort((a,b) => a-b).join('-');
+      if (!seen.has(key)) seen.set(key, { a: e.startid < e.endid ? e.startid : e.endid, b: e.startid < e.endid ? e.endid : e.startid, edges: [] });
+      seen.get(key).edges.push(e);
+    });
+    const out = [];
+    seen.forEach(g => {
+      if (g.edges.length === 2) {
+        out.push({ kind: 'bidir', a: g.a, b: g.b, edges: g.edges });
+      } else {
+        const e = g.edges[0];
+        out.push({ kind: 'dir', a: e.startid, b: e.endid, edges: [e] });
+      }
+    });
+    return out;
+  }
+
+  function drawEdges() {
+    edgesLayer.innerHTML = '';
+    const rPx = state.nodeRadiusM * pxPerMeter();
+    pairEdges().forEach(pair => {
+      // For unidirectional edges, respect the actual startid -> endid direction.
+      // For bidirectional, the order doesn't matter visually since both ends get arrows.
+      const fromId = pair.kind === 'dir' ? pair.edges[0].startid : pair.a;
+      const toId = pair.kind === 'dir' ? pair.edges[0].endid : pair.b;
+      const nodeA = state.nodes.get(fromId);
+      const nodeB = state.nodes.get(toId);
+      if (!nodeA || !nodeB) return;
+      const [ax, ay] = mapToView(nodeA.mx, nodeA.my);
+      const [bx, by] = mapToView(nodeB.mx, nodeB.my);
+      const dx = bx - ax, dy = by - ay;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      // clamp the inset so the edge never flips through itself when nodes are large
+      // relative to their separation
+      const inset = Math.min(rPx, Math.max(0, len / 2 - 1));
+      const sx = ax + ux * inset;
+      const sy = ay + uy * inset;
+      const ex = bx - ux * inset;
+      const ey = by - uy * inset;
+
+      const selected = state.selection && state.selection.type === 'edge' && pair.edges.some(e => e.id === state.selection.id);
+
+      // hit area
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      hit.setAttribute('x1', sx); hit.setAttribute('y1', sy);
+      hit.setAttribute('x2', ex); hit.setAttribute('y2', ey);
+      hit.setAttribute('class', 'edge-hit');
+      hit.dataset.edgePair = pair.edges.map(e => e.id).join(',');
+      edgesLayer.appendChild(hit);
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', sx); line.setAttribute('y1', sy);
+      line.setAttribute('x2', ex); line.setAttribute('y2', ey);
+      line.setAttribute('class', 'edge-line' + (selected ? ' selected' : ''));
+      line.dataset.edgePair = pair.edges.map(e => e.id).join(',');
+
+      if (pair.kind === 'bidir') {
+        line.setAttribute('marker-end', selected ? 'url(#arrow-sel)' : 'url(#arrow)');
+        line.setAttribute('marker-start', selected ? 'url(#arrow-start-sel)' : 'url(#arrow-start)');
+      } else {
+        // directed: arrow points from startid to endid
+        // we drew from pair.a (=startid) to pair.b (=endid), so arrow goes at end
+        line.setAttribute('marker-end', selected ? 'url(#arrow-sel)' : 'url(#arrow)');
+      }
+      edgesLayer.appendChild(line);
+    });
+  }
+
+  function drawNodes() {
+    nodesLayer.innerHTML = '';
+    const rPx = state.nodeRadiusM * pxPerMeter();
+    // clamp visual radius to a sensible range so nodes are always selectable
+    const visR = Math.max(4, Math.min(rPx, 30));
+    state.nodes.forEach(n => {
+      const [vx, vy] = mapToView(n.mx, n.my);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('transform', `translate(${vx},${vy})`);
+      g.dataset.nodeId = n.id;
+      const selected = state.selection && state.selection.type === 'node' && state.selection.id === n.id;
+      if (selected) {
+        const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        halo.setAttribute('r', visR + 6);
+        halo.setAttribute('class', 'node-halo');
+        g.appendChild(halo);
+      }
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('r', visR);
+      c.setAttribute('class', 'node-circle ' + (n.kind || '') + (selected ? ' selected' : ''));
+      g.appendChild(c);
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', visR + 4); label.setAttribute('y', 4);
+      label.setAttribute('class', 'node-label');
+      label.textContent = n.name || ('n' + n.id);
+      g.appendChild(label);
+      nodesLayer.appendChild(g);
+    });
+  }
+
+  // === selection / panel ===
+  function select(type, id) { state.selection = { type, id }; renderPanel(); redraw(); }
+  function clearSelection() { state.selection = null; renderPanel(); redraw(); }
+
+  function renderPanel() {
+    if (!state.selection) {
+      panelEmpty.style.display = 'block';
+      panelContent.style.display = 'none';
+      panelContent.innerHTML = '';
+      return;
+    }
+    panelEmpty.style.display = 'none';
+    panelContent.style.display = 'block';
+    if (state.selection.type === 'node') renderNodePanel(state.nodes.get(state.selection.id));
+    else renderEdgePanel(state.edges.get(state.selection.id));
+  }
+
+  function el(tag, attrs = {}, children = []) {
+    const e = document.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => {
+      if (k === 'style') e.style.cssText = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+      else if (k === 'class') e.className = v;
+      else e.setAttribute(k, v);
+    });
+    children.forEach(c => e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+    return e;
+  }
+  function propRow(label, input) {
+    const r = el('div', { class: 'prop-row' });
+    r.appendChild(el('label', {}, [label]));
+    r.appendChild(input);
+    return r;
+  }
+  function textInput(val, onChange) {
+    const i = el('input', { type: 'text', value: val });
+    i.addEventListener('input', () => onChange(i.value));
+    return i;
+  }
+  function numInput(val, onChange) {
+    const i = el('input', { type: 'number', step: 'any', value: val });
+    i.addEventListener('change', () => onChange(parseFloat(i.value) || 0));
+    return i;
+  }
+  function selectInput(opts, val, onChange) {
+    const s = el('select');
+    opts.forEach(o => {
+      const opt = el('option', { value: o }, [o]);
+      if (o === val) opt.setAttribute('selected', 'selected');
+      s.appendChild(opt);
+    });
+    s.addEventListener('change', () => onChange(s.value));
+    return s;
+  }
+
+  function renderNodePanel(n) {
+    if (!n) return;
+    panelContent.innerHTML = '';
+    const sec = el('div', { class: 'panel-section' });
+    const titleEl = el('div', { class: 'node-title' });
+    titleEl.appendChild(document.createTextNode(n.name || ('node ' + n.id)));
+    const subEl = el('span', { class: 'node-title-sub' }, ['#' + n.id]);
+    titleEl.appendChild(subEl);
+    sec.appendChild(titleEl);
+    sec.appendChild(propRow('Name', textInput(n.name || '', v => { n.name = v; drawNodes(); renderPanel(); })));
+    sec.appendChild(propRow('Kind', selectInput(['regular','start','goal','waypoint'], n.kind || 'regular', v => {
+      n.kind = v === 'regular' ? '' : v; drawNodes();
+    })));
+    sec.appendChild(propRow('x (m)', numInput(n.mx, v => { n.mx = v; redraw(); })));
+    sec.appendChild(propRow('y (m)', numInput(n.my, v => { n.my = v; redraw(); })));
+    panelContent.appendChild(sec);
+
+    const sec2 = el('div', { class: 'panel-section' });
+    sec2.appendChild(el('h4', {}, ['Connected edges']));
+    const list = el('div', { class: 'edge-list' });
+    let count = 0;
+    state.edges.forEach(e => {
+      if (e.startid === n.id || e.endid === n.id) {
+        count++;
+        const other = e.startid === n.id ? e.endid : e.startid;
+        const otherNode = state.nodes.get(other);
+        const arrow = e.startid === n.id ? '→' : '←';
+        const row = el('div', { class: 'edge-list-item', onclick: () => select('edge', e.id) },
+          [`${arrow} ${otherNode ? (otherNode.name || 'n'+other) : 'n'+other} (id ${e.id})`]);
+        list.appendChild(row);
+      }
+    });
+    if (count === 0) list.appendChild(document.createTextNode('No connections yet.'));
+    sec2.appendChild(list);
+    panelContent.appendChild(sec2);
+
+    const delBtn = el('button', { class: 'danger full-btn', onclick: () => deleteNode(n.id) }, ['Delete node']);
+    panelContent.appendChild(delBtn);
+  }
+
+  function renderEdgePanel(e) {
+    if (!e) return;
+    panelContent.innerHTML = '';
+    const sec = el('div', { class: 'panel-section' });
+    const a = state.nodes.get(e.startid), b = state.nodes.get(e.endid);
+    const titleEl = el('div', { class: 'node-title' });
+    titleEl.appendChild(document.createTextNode('edge'));
+    const subEl = el('span', { class: 'node-title-sub' }, ['#' + e.id]);
+    titleEl.appendChild(subEl);
+    sec.appendChild(titleEl);
+    sec.appendChild(el('div', { style: 'font-size: 12px; color: var(--text-muted); margin-bottom: 14px; font-family: ui-monospace, Menlo, monospace;' },
+      [`${a?.name || 'n'+e.startid}  →  ${b?.name || 'n'+e.endid}`]));
+
+    const pairEdge = findReverseEdge(e);
+    const isBidir = !!pairEdge;
+    sec.appendChild(propRow('Direction', selectInput(
+      ['Bidirectional','Unidirectional'],
+      isBidir ? 'Bidirectional' : 'Unidirectional',
+      v => {
+        if (v === 'Bidirectional' && !pairEdge) {
+          addEdge(e.endid, e.startid, { ...e.metadata });
+          renderPanel(); redraw();
+        } else if (v === 'Unidirectional' && pairEdge) {
+          state.edges.delete(pairEdge.id);
+          renderPanel(); redraw();
+        }
+      }
+    )));
+    if (!isBidir) {
+      const reverseBtn = el('button', { class: 'full-btn subtle', onclick: () => {
+        const tmp = e.startid; e.startid = e.endid; e.endid = tmp;
+        renderPanel(); redraw();
+      }}, ['⇄  Reverse direction']);
+      sec.appendChild(reverseBtn);
+    }
+    sec.appendChild(propRow('Cost', numInput(e.cost, v => { e.cost = v; })));
+    sec.appendChild(propRow('Override', selectInput(['true','false'], String(e.overridable), v => { e.overridable = v === 'true'; })));
+    panelContent.appendChild(sec);
+
+    const sec2 = el('div', { class: 'panel-section' });
+    sec2.appendChild(el('h4', {}, ['Metadata']));
+    const metaContainer = el('div', {});
+    function renderMeta() {
+      metaContainer.innerHTML = '';
+      Object.entries(e.metadata || {}).forEach(([k, v]) => {
+        const row = el('div', { class: 'meta-row' });
+        const kI = el('input', { type: 'text', value: k, placeholder: 'key' });
+        const vI = el('input', { type: 'text', value: v, placeholder: 'value' });
+        const x = el('button', { onclick: () => { delete e.metadata[k]; renderMeta(); }}, ['×']);
+        kI.addEventListener('change', () => {
+          const newKey = kI.value.trim();
+          if (!newKey || newKey === k) return;
+          const old = e.metadata[k]; delete e.metadata[k]; e.metadata[newKey] = old;
+          renderMeta();
+        });
+        vI.addEventListener('change', () => {
+          const nv = parseFloat(vI.value);
+          e.metadata[kI.value] = (isNaN(nv) || vI.value === '') ? vI.value : nv;
+        });
+        row.appendChild(kI); row.appendChild(vI); row.appendChild(x);
+        metaContainer.appendChild(row);
+      });
+      const addRow = el('button', { class: 'full-btn subtle', onclick: () => {
+        if (!e.metadata) e.metadata = {};
+        let k = 'key'; let i = 1;
+        while (e.metadata[k] !== undefined) { k = 'key' + (i++); }
+        e.metadata[k] = '';
+        renderMeta();
+      }}, ['+  Add field']);
+      metaContainer.appendChild(addRow);
+    }
+    renderMeta();
+    sec2.appendChild(metaContainer);
+
+    const recalc = el('button', { class: 'full-btn subtle', onclick: () => {
+      if (!a || !b) return;
+      const d = Math.hypot(b.mx - a.mx, b.my - a.my);
+      e.metadata = e.metadata || {};
+      e.metadata.penalty = Math.round(d * 100) / 100;
+      const rev = findReverseEdge(e);
+      if (rev) { rev.metadata = rev.metadata || {}; rev.metadata.penalty = e.metadata.penalty; }
+      renderMeta();
+    }}, ['Recompute penalty from distance']);
+    sec2.appendChild(recalc);
+
+    panelContent.appendChild(sec2);
+
+    const delBtn = el('button', { class: 'danger full-btn', onclick: () => deleteEdge(e.id) }, ['Delete edge']);
+    panelContent.appendChild(delBtn);
+  }
+
+  // === ops ===
+  function addNode(mx, my, opts = {}) {
+    const id = state.nextNodeId++;
+    const n = { id, name: opts.name || ('node_' + id), kind: opts.kind || '', mx, my };
+    state.nodes.set(id, n);
+    return n;
+  }
+  function deleteNode(id) {
+    state.nodes.delete(id);
+    [...state.edges.values()].forEach(e => {
+      if (e.startid === id || e.endid === id) state.edges.delete(e.id);
+    });
+    if (state.selection && state.selection.id === id) clearSelection();
+    redraw();
+  }
+  function addEdge(startid, endid, metadata) {
+    const a = state.nodes.get(startid), b = state.nodes.get(endid);
+    if (!a || !b) return null;
+    const dist = Math.hypot(b.mx - a.mx, b.my - a.my);
+    const id = state.nextEdgeId++;
+    const e = {
+      id, startid, endid,
+      cost: 0, overridable: true,
+      metadata: metadata || { penalty: Math.round(dist * 100) / 100, speed_limit: 60.0 },
+    };
+    state.edges.set(id, e);
+    return e;
+  }
+  function deleteEdge(id) {
+    state.edges.delete(id);
+    if (state.selection && state.selection.type === 'edge' && state.selection.id === id) clearSelection();
+    redraw();
+  }
+  function findReverseEdge(e) {
+    for (const x of state.edges.values()) {
+      if (x.id !== e.id && x.startid === e.endid && x.endid === e.startid) return x;
+    }
+    return null;
+  }
+
+  // === modes ===
+  function setMode(m) {
+    state.mode = m;
+    state.pendingEdgeStart = null;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+    statusText.textContent = m === 'add-node' ? 'Click on map to add a node' :
+                              m === 'add-edge' ? 'Click first node, then second' : 'Ready';
+    svg.style.cursor = m === 'add-node' ? 'copy' : m === 'add-edge' ? 'crosshair' : 'default';
+  }
+
+  // === interactions ===
+  let dragState = null;
+
+  svg.addEventListener('mousedown', (evt) => {
+    if (evt.button === 1 || (evt.button === 0 && evt.shiftKey)) {
+      dragState = { type: 'pan', startX: evt.clientX, startY: evt.clientY, origPanX: state.panX, origPanY: state.panY };
+      svg.style.cursor = 'grabbing';
+      evt.preventDefault();
+      return;
+    }
+    const target = evt.target;
+    const nodeG = target.closest('[data-node-id]');
+    const edgeEl = target.closest('[data-edge-pair]');
+
+    if (state.mode === 'select') {
+      if (nodeG) {
+        const id = parseInt(nodeG.dataset.nodeId);
+        select('node', id);
+        const n = state.nodes.get(id);
+        const [mx, my] = clientToMap(evt);
+        dragState = { type: 'node', id, offsetX: n.mx - mx, offsetY: n.my - my };
+      } else if (edgeEl) {
+        const ids = edgeEl.dataset.edgePair.split(',').map(Number);
+        // select the forward edge (lowest id) by convention; user can navigate to reverse via panel if needed
+        select('edge', ids[0]);
+      } else {
+        clearSelection();
+      }
+    } else if (state.mode === 'add-node') {
+      if (!nodeG) {
+        const [mx, my] = clientToMap(evt);
+        const n = addNode(mx, my);
+        redraw();
+        select('node', n.id);
+      }
+    } else if (state.mode === 'add-edge') {
+      if (nodeG) {
+        const id = parseInt(nodeG.dataset.nodeId);
+        if (state.pendingEdgeStart === null) {
+          state.pendingEdgeStart = id;
+          statusText.textContent = `From node ${id}, click target...`;
+        } else if (state.pendingEdgeStart !== id) {
+          const e1 = addEdge(state.pendingEdgeStart, id);
+          addEdge(id, state.pendingEdgeStart);
+          state.pendingEdgeStart = null;
+          statusText.textContent = 'Edge added (bidirectional)';
+          redraw();
+          if (e1) select('edge', e1.id);
+        }
+      }
+    }
+  });
+
+  svg.addEventListener('mousemove', (evt) => {
+    if (dragState && dragState.type === 'pan') {
+      const scale = VIEW_W / svg.clientWidth;
+      state.panX = dragState.origPanX - (evt.clientX - dragState.startX) * scale;
+      state.panY = dragState.origPanY - (evt.clientY - dragState.startY) * scale;
+      redraw();
+      return;
+    }
+    if (dragState && dragState.type === 'node') {
+      const [mx, my] = clientToMap(evt);
+      const n = state.nodes.get(dragState.id);
+      if (n) {
+        n.mx = mx + dragState.offsetX;
+        n.my = my + dragState.offsetY;
+        redraw();
+        if (state.selection && state.selection.type === 'node' && state.selection.id === n.id) renderPanel();
+      }
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (dragState && dragState.type === 'pan') {
+      svg.style.cursor = state.mode === 'add-node' ? 'copy' : state.mode === 'add-edge' ? 'crosshair' : 'default';
+    }
+    dragState = null;
+  });
+
+  svg.addEventListener('wheel', (evt) => {
+    evt.preventDefault();
+    const [vx, vy] = clientToView(evt);
+    const oldZoom = state.zoom;
+    const factor = evt.deltaY < 0 ? 1.18 : 0.85;
+    const newZoom = Math.max(0.1, Math.min(8.0, oldZoom * factor));
+    // keep the map point under cursor stationary
+    // before: vx = mx * (PX_PER_M_BASE * oldZoom) - panX
+    // we want: vx = mx * (PX_PER_M_BASE * newZoom) - newPanX
+    // so newPanX = mx * (PX_PER_M_BASE * newZoom) - vx
+    const mx = (vx + state.panX) / (PX_PER_M_BASE * oldZoom);
+    const my = -(vy + state.panY) / (PX_PER_M_BASE * oldZoom);
+    state.zoom = newZoom;
+    state.panX = mx * PX_PER_M_BASE * newZoom - vx;
+    state.panY = -my * PX_PER_M_BASE * newZoom - vy;
+    updateZoomUI();
+    redraw();
+  }, { passive: false });
+
+  // === keyboard ===
+  window.addEventListener('keydown', (evt) => {
+    if (evt.target.tagName === 'INPUT' || evt.target.tagName === 'SELECT' || evt.target.tagName === 'TEXTAREA') return;
+    if (evt.key === 'n' || evt.key === 'N') setMode('add-node');
+    else if (evt.key === 'e' || evt.key === 'E') setMode('add-edge');
+    else if (evt.key === 'v' || evt.key === 'V') setMode('select');
+    else if (evt.key === 'Escape') { setMode('select'); clearSelection(); }
+    else if (evt.key === 'Delete' || evt.key === 'Backspace') {
+      if (state.selection) {
+        if (state.selection.type === 'node') deleteNode(state.selection.id);
+        else deleteEdge(state.selection.id);
+      }
+    }
+  });
+
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  // === zoom slider ===
+  zoomSlider.addEventListener('input', () => {
+    const oldZoom = state.zoom;
+    const newZoom = parseInt(zoomSlider.value) / 100;
+    // zoom around svg center
+    const cx = VIEW_W / 2, cy = VIEW_H / 2;
+    const mx = (cx + state.panX) / (PX_PER_M_BASE * oldZoom);
+    const my = -(cy + state.panY) / (PX_PER_M_BASE * oldZoom);
+    state.zoom = newZoom;
+    state.panX = mx * PX_PER_M_BASE * newZoom - cx;
+    state.panY = -my * PX_PER_M_BASE * newZoom - cy;
+    updateZoomUI();
+    redraw();
+  });
+
+  radiusSlider.addEventListener('input', () => {
+    state.nodeRadiusM = parseFloat(radiusSlider.value);
+    radiusVal.textContent = state.nodeRadiusM.toFixed(2);
+    redraw();
+  });
+
+  document.getElementById('reset-view-btn').addEventListener('click', () => {
+    state.zoom = 1.0;
+    state.panX = -200;
+    state.panY = -300;
+    updateZoomUI();
+    redraw();
+  });
+
+  document.getElementById('fit-map-btn').addEventListener('click', () => {
+    if (!state.mapMeta || !state.imgW) { statusText.textContent = 'No map loaded'; return; }
+    const res = state.mapMeta.resolution;
+    const mapWm = state.imgW * res;
+    const mapHm = state.imgH * res;
+    const padding = 0.95;
+    const zoomX = (VIEW_W * padding) / (mapWm * PX_PER_M_BASE);
+    const zoomY = (VIEW_H * padding) / (mapHm * PX_PER_M_BASE);
+    state.zoom = Math.min(zoomX, zoomY);
+    // center map
+    const cxM = state.mapMeta.originX + mapWm / 2;
+    const cyM = state.mapMeta.originY + mapHm / 2;
+    state.panX = cxM * PX_PER_M_BASE * state.zoom - VIEW_W / 2;
+    state.panY = -cyM * PX_PER_M_BASE * state.zoom - VIEW_H / 2;
+    updateZoomUI();
+    redraw();
+  });
+
+  document.getElementById('fit-graph-btn').addEventListener('click', () => {
+    if (state.nodes.size === 0) { statusText.textContent = 'No nodes'; return; }
+    const xs = [...state.nodes.values()].map(n => n.mx);
+    const ys = [...state.nodes.values()].map(n => n.my);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const spanX = Math.max(maxX - minX, 1);
+    const spanY = Math.max(maxY - minY, 1);
+    const padding = 0.85;
+    const zoomX = (VIEW_W * padding) / (spanX * PX_PER_M_BASE);
+    const zoomY = (VIEW_H * padding) / (spanY * PX_PER_M_BASE);
+    state.zoom = Math.max(0.1, Math.min(zoomX, zoomY, 8));
+    const cxM = (minX + maxX) / 2;
+    const cyM = (minY + maxY) / 2;
+    state.panX = cxM * PX_PER_M_BASE * state.zoom - VIEW_W / 2;
+    state.panY = -cyM * PX_PER_M_BASE * state.zoom - VIEW_H / 2;
+    updateZoomUI();
+    redraw();
+  });
+
+  // === file loading ===
+  document.getElementById('pgm-input').addEventListener('change', async (evt) => {
+    const f = evt.target.files[0];
+    if (!f) return;
+    try {
+      statusText.textContent = 'Parsing PGM...';
+      const buf = await f.arrayBuffer();
+      const { dataUrl, width, height } = parsePGM(buf);
+      state.mapDataUrl = dataUrl;
+      state.imgW = width; state.imgH = height;
+      mapImg.setAttribute('href', dataUrl);
+      if (!state.mapMeta) state.mapMeta = { resolution: 0.05, originX: 0, originY: 0 };
+      redraw();
+      statusText.textContent = `PGM loaded: ${width}x${height}, click Fit map`;
+      infoOverlay.textContent = `${width}x${height}px, res=${state.mapMeta.resolution}m/px, origin=(${state.mapMeta.originX}, ${state.mapMeta.originY})`;
+    } catch (err) {
+      statusText.textContent = 'PGM error: ' + err.message;
+    }
+  });
+
+  document.getElementById('yaml-input').addEventListener('change', async (evt) => {
+    const f = evt.target.files[0];
+    if (!f) return;
+    const text = await f.text();
+    const y = parseYaml(text);
+    const origin = Array.isArray(y.origin) ? y.origin : [0, 0, 0];
+    state.mapMeta = {
+      resolution: y.resolution || 0.05,
+      originX: origin[0] || 0,
+      originY: origin[1] || 0,
+    };
+    redraw();
+    statusText.textContent = `YAML loaded: res=${state.mapMeta.resolution}m/px, origin=(${state.mapMeta.originX}, ${state.mapMeta.originY})`;
+    if (state.imgW) {
+      infoOverlay.textContent = `${state.imgW}x${state.imgH}px, res=${state.mapMeta.resolution}m/px, origin=(${state.mapMeta.originX}, ${state.mapMeta.originY})`;
+    }
+  });
+
+  document.getElementById('geojson-input').addEventListener('change', async (evt) => {
+    const f = evt.target.files[0];
+    if (!f) return;
+    const text = await f.text();
+    try {
+      const data = JSON.parse(text);
+      importGeoJSON(data);
+      statusText.textContent = `Imported ${state.nodes.size} nodes, ${state.edges.size} edges`;
+    } catch (err) {
+      statusText.textContent = 'Import error: ' + err.message;
+    }
+  });
+
+  function importGeoJSON(data) {
+    state.nodes.clear();
+    state.edges.clear();
+    state.nextNodeId = 0;
+    state.nextEdgeId = 10;
+    (data.features || []).forEach(f => {
+      const p = f.properties || {};
+      if (f.geometry.type === 'Point') {
+        const [mx, my] = f.geometry.coordinates;
+        state.nodes.set(p.id, {
+          id: p.id, name: p.name || '', kind: p.kind || '', mx, my,
+        });
+        state.nextNodeId = Math.max(state.nextNodeId, p.id + 1);
+      } else if (f.geometry.type === 'MultiLineString') {
+        state.edges.set(p.id, {
+          id: p.id, startid: p.startid, endid: p.endid,
+          cost: p.cost || 0,
+          overridable: p.overridable !== false,
+          metadata: p.metadata || {},
+        });
+        state.nextEdgeId = Math.max(state.nextEdgeId, p.id + 1);
+      }
+    });
+    document.getElementById('fit-graph-btn').click();
+  }
+
+  // Format a number preserving .0 on whole numbers (to match the sample format)
+  function fmtNum(n) {
+    if (Number.isInteger(n)) return n.toFixed(1);
+    return String(n);
+  }
+
+  // Format a single feature on one line, with spaces matching the user's layout
+  function fmtFeature(f) {
+    const g = f.geometry;
+    let geomStr;
+    if (g.type === 'Point') {
+      const [x, y] = g.coordinates;
+      geomStr = `{ "type": "Point", "coordinates": [ ${fmtNum(x)}, ${fmtNum(y)} ] }`;
+    } else if (g.type === 'MultiLineString') {
+      const lines = g.coordinates.map(line =>
+        '[ ' + line.map(c => `[ ${fmtNum(c[0])}, ${fmtNum(c[1])} ]`).join(', ') + ' ]'
+      );
+      geomStr = `{ "type": "MultiLineString", "coordinates": [ ${lines.join(', ')} ] }`;
+    } else {
+      geomStr = JSON.stringify(g);
+    }
+    // properties: keep keys in a stable order matching the sample
+    const p = f.properties;
+    const parts = [];
+    const keyOrder = ['frame', 'id', 'name', 'kind', 'startid', 'endid', 'cost', 'overridable', 'metadata'];
+    keyOrder.forEach(k => {
+      if (p[k] !== undefined) {
+        if (k === 'metadata') {
+          const m = p[k];
+          if (Object.keys(m).length === 0) {
+            parts.push(`"metadata": {}`);
+          } else {
+            const inner = Object.entries(m).map(([mk, mv]) => `"${mk}": ${JSON.stringify(mv)}`).join(', ');
+            parts.push(`"metadata": { ${inner} }`);
+          }
+        } else {
+          parts.push(`"${k}": ${JSON.stringify(p[k])}`);
+        }
+      }
+    });
+    // include any custom keys not in keyOrder
+    Object.keys(p).forEach(k => {
+      if (!keyOrder.includes(k)) parts.push(`"${k}": ${JSON.stringify(p[k])}`);
+    });
+    const propsStr = `{ ${parts.join(', ')} }`;
+    return `    { "type": "Feature", "geometry": ${geomStr}, "properties": ${propsStr} }`;
+  }
+
+  function buildGeoJSONText(nodeFeatures, edgePairs) {
+    const lines = [];
+    lines.push('{');
+    lines.push('  "crs": {');
+    lines.push('    "type": "name",');
+    lines.push('    "properties": {');
+    lines.push('      "name": "urn:ogc:def:crs:EPSG::3857"');
+    lines.push('    }');
+    lines.push('  },');
+    lines.push('  "type": "FeatureCollection",');
+    lines.push('  "name": "graph",');
+    lines.push('  "features": [');
+
+    // nodes block, comma-separated, on individual lines
+    const nodeLines = nodeFeatures.map(fmtFeature);
+    // edges: edgePairs is an array of arrays; each inner array contains 1 or 2 edge features that go together
+    // we want a blank line between groups, with commas in the right places
+    const allBlocks = [];
+    if (nodeLines.length > 0) {
+      allBlocks.push(nodeLines);
+    }
+    edgePairs.forEach(group => {
+      allBlocks.push(group.map(fmtFeature));
+    });
+
+    // join: within a block, items are comma-separated by line; between blocks, last line gets comma + blank line
+    const flatOutput = [];
+    allBlocks.forEach((block, blockIdx) => {
+      block.forEach((line, lineIdx) => {
+        const isLastOfBlock = lineIdx === block.length - 1;
+        const isLastBlock = blockIdx === allBlocks.length - 1;
+        const needsComma = !(isLastOfBlock && isLastBlock);
+        flatOutput.push(line + (needsComma ? ',' : ''));
+      });
+      // blank line between blocks (except after the last block)
+      if (blockIdx < allBlocks.length - 1) flatOutput.push('');
+    });
+    lines.push(...flatOutput);
+    lines.push('  ]');
+    lines.push('}');
+    return lines.join('\n');
+  }
+  document.getElementById('export-btn').addEventListener('click', () => {
+    // round helper
+    const r = v => Math.round(v * 1000) / 1000;
+
+    // node features in insertion order
+    const nodeFeatures = [];
+    state.nodes.forEach(n => {
+      const props = { frame: 'map', id: n.id, name: n.name || ('node_' + n.id) };
+      if (n.kind) props.kind = n.kind;
+      nodeFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [r(n.mx), r(n.my)] },
+        properties: props,
+      });
+    });
+
+    // group edges into bidirectional pairs (or singletons for unidirectional)
+    // order: by lowest edge id within group, then groups sorted by that lowest id
+    const visited = new Set();
+    const groups = [];
+    state.edges.forEach(e => {
+      if (visited.has(e.id)) return;
+      const rev = findReverseEdge(e);
+      if (rev) {
+        // determine which one to list first: the one with lower id
+        const first = e.id < rev.id ? e : rev;
+        const second = e.id < rev.id ? rev : e;
+        groups.push([first, second]);
+        visited.add(first.id);
+        visited.add(second.id);
+      } else {
+        groups.push([e]);
+        visited.add(e.id);
+      }
+    });
+    // sort groups by the lowest id in each group (matches the sample's ascending ordering)
+    groups.sort((a, b) => Math.min(...a.map(x => x.id)) - Math.min(...b.map(x => x.id)));
+
+    const edgeGroups = groups.map(group => group.map(e => {
+      const a = state.nodes.get(e.startid), b = state.nodes.get(e.endid);
+      const props = {
+        id: e.id,
+        startid: e.startid,
+        endid: e.endid,
+        cost: e.cost || 0,
+        overridable: e.overridable !== false,
+      };
+      // only emit metadata key if non-empty, matching the sample where late edges (26-29) omit it
+      if (e.metadata && Object.keys(e.metadata).length > 0) {
+        props.metadata = e.metadata;
+      }
+      return {
+        type: 'Feature',
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [[ [r(a.mx), r(a.my)], [r(b.mx), r(b.my)] ]],
+        },
+        properties: props,
+      };
+    }));
+
+    const text = buildGeoJSONText(nodeFeatures, edgeGroups);
+    const blob = new Blob([text], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'graph.geojson';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+    statusText.textContent = `Exported ${state.nodes.size} nodes + ${state.edges.size} edges`;
+  });
+
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    if (!confirm('Clear all nodes and edges?')) return;
+    state.nodes.clear(); state.edges.clear();
+    state.nextNodeId = 0; state.nextEdgeId = 10;
+    clearSelection();
+    redraw();
+  });
+
+  // === seed sample (matches the provided graph) ===
+  function seedSample() {
+    const nodes = [
+      {id:0, name:'start', mx:1.0, my:0.0, kind:'start'},
+      {id:2, name:'center', mx:3.4, my:0.0, kind:''},
+      {id:3, name:'in_top', mx:2.4, my:1.0, kind:''},
+      {id:4, name:'in_bot', mx:2.4, my:-0.5, kind:''},
+      {id:5, name:'out_top', mx:4.8, my:1.0, kind:''},
+      {id:6, name:'out_bot', mx:4.8, my:-0.5, kind:''},
+      {id:7, name:'goal', mx:6.7, my:0.0, kind:'goal'},
+    ];
+    nodes.forEach(n => state.nodes.set(n.id, n));
+    state.nextNodeId = 8;
+    const edges = [
+      [10,0,3,28.32],[11,3,0,28.32],[12,0,2,38.03],[13,2,0,38.03],
+      [14,0,4,36.1],[15,4,0,36.1],[16,3,2,9.04],[17,2,3,9.04],
+      [18,4,2,21.81],[19,2,4,21.81],[20,2,5,0.97],[21,5,2,0.97],
+      [22,2,6,1.95],[23,6,2,1.95],[24,2,7,0.97],[25,7,2,0.97],
+      [26,5,7,null],[27,7,5,null],[28,6,7,null],[29,7,6,null],
+    ];
+    edges.forEach(([id, s, e, pen]) => {
+      const meta = pen != null ? { penalty: pen, speed_limit: 60.0 } : {};
+      state.edges.set(id, { id, startid: s, endid: e, cost: 0, overridable: true, metadata: meta });
+    });
+    state.nextEdgeId = 30;
+  }
+
+  // init
+  setMode('select');
+  seedSample();
+  document.getElementById('fit-graph-btn').click();
+})();
+</script>
+</body>
+</html>
