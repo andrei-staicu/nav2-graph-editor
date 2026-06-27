@@ -138,6 +138,10 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-bg);
   }
+  input.input-error {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(184, 84, 54, 0.15);
+  }
   input[type="range"] {
     width: 100%;
     -webkit-appearance: none;
@@ -478,6 +482,15 @@
     pointer-events: none;
     font-family: ui-sans-serif, system-ui, sans-serif;
     font-weight: 500;
+  }
+  .node-id-label {
+    font-size: 10px;
+    fill: var(--text);
+    pointer-events: none;
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
   }
   .edge-line {
     stroke: #6B6B6B;
@@ -1174,6 +1187,12 @@
       c.setAttribute('r', visR);
       c.setAttribute('class', 'node-circle ' + (n.kind || '') + (selected ? ' selected' : ''));
       g.appendChild(c);
+      if (visR >= 8) {
+        const idLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        idLabel.setAttribute('class', 'node-id-label');
+        idLabel.textContent = n.id;
+        g.appendChild(idLabel);
+      }
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       label.setAttribute('x', visR + 4); label.setAttribute('y', 4);
       label.setAttribute('class', 'node-label');
@@ -1247,6 +1266,25 @@
     const subEl = el('span', { class: 'node-title-sub' }, ['#' + n.id]);
     titleEl.appendChild(subEl);
     sec.appendChild(titleEl);
+    const idInput = el('input', { type: 'number', step: '1', min: '0', value: n.id });
+    idInput.addEventListener('change', () => {
+      const newId = parseInt(idInput.value);
+      if (!Number.isInteger(newId) || newId < 0) {
+        idInput.value = n.id;
+        return;
+      }
+      if (newId === n.id) return;
+      if (state.nodes.has(newId)) {
+        idInput.value = n.id;
+        idInput.classList.add('input-error');
+        setTimeout(() => idInput.classList.remove('input-error'), 1200);
+        return;
+      }
+      renameNodeId(n.id, newId);
+      renderPanel();
+      redraw();
+    });
+    sec.appendChild(propRow('ID', idInput));
     sec.appendChild(propRow('Name', textInput(n.name || '', v => { n.name = v; drawNodes(); renderPanel(); })));
     sec.appendChild(propRow('Kind', selectInput(['regular','start','goal','waypoint'], n.kind || 'regular', v => {
       n.kind = v === 'regular' ? '' : v; drawNodes();
@@ -1370,6 +1408,26 @@
   }
 
   // === ops ===
+  function renameNodeId(oldId, newId) {
+    if (!Number.isInteger(newId) || newId < 0) return false;
+    if (newId === oldId) return true;
+    if (state.nodes.has(newId)) return false;
+    const n = state.nodes.get(oldId);
+    if (!n) return false;
+    state.nodes.delete(oldId);
+    n.id = newId;
+    state.nodes.set(newId, n);
+    state.edges.forEach(e => {
+      if (e.startid === oldId) e.startid = newId;
+      if (e.endid === oldId) e.endid = newId;
+    });
+    if (state.selection && state.selection.type === 'node' && state.selection.id === oldId) {
+      state.selection.id = newId;
+    }
+    if (newId >= state.nextNodeId) state.nextNodeId = newId + 1;
+    return true;
+  }
+
   function addNode(mx, my, opts = {}) {
     const id = state.nextNodeId++;
     const n = { id, name: opts.name || ('node_' + id), kind: opts.kind || '', mx, my };
