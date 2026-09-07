@@ -70,9 +70,16 @@ Select a node with `V` (Select mode) and click it. The side panel now shows:
 - **Name**, edit it to whatever makes sense for your domain (`hall_entry`, `plant_5`, `cb204`, etc.)
 - **Kind**, choose between `regular`, `start`, `goal`, or `waypoint`. Colours change accordingly.
 - **x, y**, edit the coordinates manually for precise positioning
+- **Rotation**, the orientation (yaw) the robot should hold at this node, see below
 - **Connected edges**, lists all edges touching this node, click to jump to one
 
-Drag any node with the mouse to reposition it. Connected edges follow in real time.
+Drag any node with the mouse to reposition it. Connected edges follow in real time, and the panel coordinates update as you drag.
+
+#### Node orientation (yaw)
+
+A selected node shows an arrow starting from its centre. Drag the round handle at the tip to point it wherever the robot should face when it arrives. The **Rotation** section of the panel mirrors it with a dial you can drag and a **Degrees** field you can type into, and **Clear rotation** removes the value again.
+
+Yaw is stored in radians in the map frame, counter-clockwise positive, `0` pointing along `+x`, the same convention as `geometry_msgs/Pose` after conversion from a quaternion. Nodes that have a yaw keep a dim arrow when they are not selected, so a whole graph of oriented docking or inspection poses is readable at a glance. Nodes without one export no `yaw` property at all.
 
 ### 3. Draw edges
 
@@ -90,7 +97,11 @@ Select any edge by clicking its line. The side panel exposes:
 
 If you already have a `route_graph.geojson` file, click **Import GeoJSON** to load it. The editor reconstructs all nodes, edges, and metadata, and uses the map's origin so everything appears at the correct world-frame coordinates.
 
-### 5. Export
+### 5. Move around the map
+
+The control at the top-left of the canvas has **+** and **&minus;** buttons for zooming around the centre of the view, a horizontal slider for panning left and right, and a live zoom percentage. Mouse scroll still zooms around the cursor, and Shift+drag or middle-click drag still pans freely in both axes.
+
+### 6. Export
 
 Click **Export GeoJSON**. A file named `graph.geojson` downloads, formatted in the stable layout described below. Drop it into your Nav2 route server config and you're done.
 
@@ -106,13 +117,15 @@ The exported GeoJSON uses EPSG:3857 with coordinates in map-frame metres. Each f
   "type": "FeatureCollection",
   "name": "graph",
   "features": [
-    { "type": "Feature", "geometry": { "type": "Point", "coordinates": [ 1.0, 0.0 ] }, "properties": { "frame": "map", "id": 0, "name": "start" } },
+    { "type": "Feature", "geometry": { "type": "Point", "coordinates": [ 1.0, 0.0 ] }, "properties": { "frame": "map", "id": 0, "name": "start", "yaw": 1.571 } },
 
     { "type": "Feature", "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 1.0, 0.0 ], [ 2.4, 1.0 ] ] ] }, "properties": { "id": 10, "startid": 0, "endid": 3, "cost": 0, "overridable": true, "metadata": { "penalty": 28.32, "speed_limit": 60.0 } } },
     { "type": "Feature", "geometry": { "type": "MultiLineString", "coordinates": [ [ [ 2.4, 1.0 ], [ 1.0, 0.0 ] ] ] }, "properties": { "id": 11, "startid": 3, "endid": 0, "cost": 0, "overridable": true, "metadata": { "penalty": 28.32, "speed_limit": 60.0 } } }
   ]
 }
 ```
+
+`yaw` is optional and appears only on nodes that have an orientation set. It is rounded to three decimals (about 0.06 degrees) and survives an import/export round trip.
 
 This format is stable across exports, so re-saving an unchanged graph produces a byte-identical file. Version control behaves cleanly.
 
@@ -128,8 +141,9 @@ This format is stable across exports, so re-saving an unchanged graph produces a
 | Reverse direction | One-click flip of edge direction |
 | Arbitrary edge metadata | Any key-value pair, parsed as number when possible |
 | Node types | `regular`, `start`, `goal`, `waypoint`, colour-coded |
+| Node orientation | Per-node yaw, drag the arrow on the node or the dial in the panel, exported as `yaw` |
 | Drag-to-move | Nodes drag smoothly, edges follow |
-| Zoom / pan | Mouse scroll, slider, Shift+drag, middle-click drag |
+| Zoom / pan | Mouse scroll, on-canvas +/- buttons and pan slider, overlay slider, Shift+drag, middle-click drag |
 | Fit to map / graph | Auto-frame either the map or the graph extent |
 | Round-trip GeoJSON | Import existing graphs, edit, export in the same stable format |
 | Self-contained | Single HTML file, no build, no install, works offline |

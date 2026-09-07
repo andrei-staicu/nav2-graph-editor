@@ -316,6 +316,59 @@
   .zoom-overlay button { padding: 5px 10px; font-size: 11px; flex: 1; }
   .zoom-overlay .divider { height: 1px; background: var(--border); margin: 12px 0 4px; }
 
+  /* On-canvas view control: horizontal pan slider + zoom buttons.
+     Sits top-left so it never fights with overlays anchored bottom-left. */
+  .zoom-ctl {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(20,20,19,0.10);
+    backdrop-filter: blur(8px);
+    z-index: 5;
+    user-select: none;
+  }
+  .zoom-ctl button {
+    width: 30px; height: 30px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1; font-weight: 500;
+    border-radius: 8px;
+  }
+  .zoom-ctl button:active { background: var(--accent); color: var(--surface-elevated); border-color: var(--accent); }
+  /* Horizontal slider = pan left/right. On webkit the thumb only centres on the
+     track with a negative margin-top of (thumb_height - track_height) / 2. */
+  .zoom-ctl input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 150px; height: 16px; margin: 0;
+    background: transparent; cursor: pointer;
+  }
+  .zoom-ctl input[type="range"]:disabled { opacity: .35; cursor: default; }
+  .zoom-ctl input[type="range"]::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 3px; background: var(--surface-muted);
+  }
+  .zoom-ctl input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--surface-elevated);
+    box-shadow: 0 1px 3px rgba(20,20,19,0.25);
+    margin-top: -5px;                          /* (15 - 5) / 2 */
+  }
+  .zoom-ctl input[type="range"]::-moz-range-track {
+    height: 5px; border-radius: 3px; background: var(--surface-muted);
+  }
+  .zoom-ctl input[type="range"]::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--surface-elevated);
+  }
+  .zoom-ctl .zpct { font-size: 10px; color: var(--text-subtle); font-family: ui-monospace, Menlo, monospace; min-width: 34px; text-align: right; }
+
   .panel {
     background: var(--surface-elevated);
     border: 1px solid var(--border);
@@ -502,6 +555,13 @@
   .edge-line:hover { stroke: var(--accent); stroke-width: 2; }
   .edge-line.selected { stroke: var(--accent); stroke-width: 2; }
   .edge-hit { stroke: transparent; stroke-width: 16; fill: none; cursor: pointer; }
+
+  /* per-node orientation (rotation) arrow */
+  .rot-line { stroke: var(--accent); stroke-width: 2; fill: none; pointer-events: none; }
+  .rot-line.dim { stroke: var(--text-subtle); stroke-width: 1.5; opacity: 0.7; }
+  .rot-handle { fill: var(--accent); stroke: var(--surface-elevated); stroke-width: 1.5; cursor: grab; }
+  .rot-handle:active { cursor: grabbing; }
+  .rot-hit { fill: transparent; cursor: grab; }
 
   /* node and edge appearance transitions handled by CSS hover, no entrance animation
      (entrance fade caused flicker during drag since redraw recreates DOM each frame) */
@@ -748,12 +808,25 @@
           <marker id="arrow-start-sel" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 1 L 10 5 L 0 9 z" fill="#C96442"/>
           </marker>
+          <marker id="rot-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#C96442"/>
+          </marker>
+          <marker id="rot-arrow-dim" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="#93918A"/>
+          </marker>
         </defs>
         <image id="map-img" x="0" y="0" width="0" height="0" preserveAspectRatio="none" opacity="0.7"/>
         <g id="frame-helpers"></g>
         <g id="edges-layer" class="edges-layer"></g>
         <g id="nodes-layer" class="nodes-layer"></g>
       </svg>
+      <div class="zoom-ctl">
+        <button id="zoom-out-btn" title="Zoom out">&minus;</button>
+        <input type="range" id="pan-slider" min="0" max="1000" value="500"
+               title="Pan left / right">
+        <button id="zoom-in-btn" title="Zoom in">+</button>
+        <span class="zpct" id="zoom-vpct">100%</span>
+      </div>
       <div class="info-overlay" id="info-overlay">no map loaded</div>
       <div class="legend">
         <div class="legend-item"><span class="legend-dot regular"></span>regular</div>
@@ -902,6 +975,8 @@
   const statusText = document.getElementById('status-text');
   const zoomSlider = document.getElementById('zoom-slider');
   const zoomVal = document.getElementById('zoom-val');
+  const panSlider = document.getElementById('pan-slider');
+  const zoomVPct = document.getElementById('zoom-vpct');
   const radiusSlider = document.getElementById('radius-slider');
   const radiusVal = document.getElementById('radius-val');
 
@@ -981,11 +1056,69 @@
     mapImg.setAttribute('height', heightView);
   }
 
-  function updateZoomUI() {
-    zoomVal.textContent = Math.round(state.zoom * 100) + '%';
-    if (parseInt(zoomSlider.value) !== Math.round(state.zoom * 100)) {
-      zoomSlider.value = Math.round(state.zoom * 100);
+  // The x range the pan slider may travel over: the map when one is loaded,
+  // otherwise the extent of the nodes. With neither there is no reference, so
+  // the slider is disabled instead of sliding over nothing.
+  function panRangeX() {
+    if (state.mapMeta && state.imgW) {
+      const wm = state.imgW * state.mapMeta.resolution;
+      return [state.mapMeta.originX - wm * 0.15,
+              state.mapMeta.originX + wm * 1.15];
     }
+    if (state.nodes.size) {
+      const xs = [...state.nodes.values()].map(n => n.mx);
+      const lo = Math.min(...xs), hi = Math.max(...xs);
+      const pad = Math.max((hi - lo) * 0.15, 2);
+      return [lo - pad, hi + pad];
+    }
+    return null;
+  }
+
+  // centre of the view on x, in map metres
+  function viewCenterX() {
+    return (state.panX + VIEW_W / 2) / pxPerMeter();
+  }
+
+  function updateZoomUI() {
+    const pct = Math.round(state.zoom * 100);
+    zoomVal.textContent = pct + '%';
+    if (parseInt(zoomSlider.value) !== pct) zoomSlider.value = pct;
+    if (zoomVPct) zoomVPct.textContent = pct + '%';
+    if (!panSlider) return;
+    // the slider -> pan -> slider round trip is exact, so syncing while the user
+    // drags just writes back the same value instead of fighting the drag.
+    const range = panRangeX();
+    panSlider.disabled = !range;
+    if (!range) return;
+    const t = (viewCenterX() - range[0]) / (range[1] - range[0]);
+    const val = Math.round(Math.max(0, Math.min(1, t)) * 1000);
+    if (parseInt(panSlider.value) !== val) panSlider.value = val;
+  }
+
+  function applyPanSlider() {
+    const range = panRangeX();
+    if (!range) return;
+    const t = parseInt(panSlider.value) / 1000;
+    const cxM = range[0] + (range[1] - range[0]) * t;
+    state.panX = cxM * pxPerMeter() - VIEW_W / 2;
+    redraw();
+  }
+
+  // Set zoom to a new level while keeping the view point (cx,cy) stationary.
+  // cx,cy default to the canvas centre.
+  function setZoom(newZoom, cx, cy) {
+    if (cx == null) cx = VIEW_W / 2;
+    if (cy == null) cy = VIEW_H / 2;
+    const oldZoom = state.zoom;
+    newZoom = Math.max(0.1, Math.min(8.0, newZoom));
+    if (newZoom === oldZoom) return;
+    const mx = (cx + state.panX) / (PX_PER_M_BASE * oldZoom);
+    const my = -(cy + state.panY) / (PX_PER_M_BASE * oldZoom);
+    state.zoom = newZoom;
+    state.panX = mx * PX_PER_M_BASE * newZoom - cx;
+    state.panY = -my * PX_PER_M_BASE * newZoom - cy;
+    updateZoomUI();
+    redraw();
   }
 
   // === yaml (minimal) ===
@@ -1092,6 +1225,8 @@
     updateMapImage();
     drawEdges();
     drawNodes();
+    // reverse sync: after panning with the mouse, the slider shows where you are
+    if (panSlider) updateZoomUI();
   }
 
   // pair edges by unordered node pair; if both directions exist, render as bidirectional (one line, two arrows)
@@ -1198,15 +1333,58 @@
       label.setAttribute('class', 'node-label');
       label.textContent = n.name || ('n' + n.id);
       g.appendChild(label);
+      // orientation arrow: draggable for the selected node, dim/static for others that have a yaw
+      drawNodeRotation(g, n, selected, visR);
       nodesLayer.appendChild(g);
     });
+  }
+
+  // Draw a rotation (orientation) arrow from the node centre.
+  // The selected node always shows a draggable arrow (yaw defaults to 0);
+  // other nodes only show a dim static arrow if they have a defined yaw.
+  function drawNodeRotation(g, n, selected, visR) {
+    const hasYaw = typeof n.yaw === 'number' && !Number.isNaN(n.yaw);
+    if (!selected && !hasYaw) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const yaw = hasYaw ? n.yaw : 0;
+    const len = Math.max(visR + 22, 34);
+    // map-frame yaw -> view: view y is flipped, so view direction = (cos yaw, -sin yaw)
+    const tx = len * Math.cos(yaw);
+    const ty = -len * Math.sin(yaw);
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+    line.setAttribute('x2', tx); line.setAttribute('y2', ty);
+    line.setAttribute('class', 'rot-line' + (selected ? '' : ' dim'));
+    line.setAttribute('marker-end', selected ? 'url(#rot-arrow)' : 'url(#rot-arrow-dim)');
+    g.appendChild(line);
+    if (selected) {
+      // large invisible hit target so the handle is easy to grab
+      const hit = document.createElementNS(NS, 'circle');
+      hit.setAttribute('cx', tx); hit.setAttribute('cy', ty); hit.setAttribute('r', 12);
+      hit.setAttribute('class', 'rot-hit');
+      hit.dataset.rotHandle = n.id;
+      g.appendChild(hit);
+      const knob = document.createElementNS(NS, 'circle');
+      knob.setAttribute('cx', tx); knob.setAttribute('cy', ty); knob.setAttribute('r', 5);
+      knob.setAttribute('class', 'rot-handle');
+      knob.dataset.rotHandle = n.id;
+      g.appendChild(knob);
+    }
   }
 
   // === selection / panel ===
   function select(type, id) { state.selection = { type, id }; renderPanel(); redraw(); }
   function clearSelection() { state.selection = null; renderPanel(); redraw(); }
 
+  // Set while a node panel is on screen: these refresh single widgets in place
+  // (coordinates, rotation dial) so a drag does not rebuild the whole panel DOM
+  // on every pointer move, which would also throw away keyboard focus.
+  let nodeCoordsUpdate = null;
+  let rotSectionUpdate = null;
+
   function renderPanel() {
+    nodeCoordsUpdate = null;
+    rotSectionUpdate = null;
     if (!state.selection) {
       panelEmpty.style.display = 'block';
       panelContent.style.display = 'none';
@@ -1257,6 +1435,85 @@
     return s;
   }
 
+  // Rotation control ("dashboard"): an interactive dial + degrees input.
+  // Yaw is stored in radians (map frame, CCW-positive, 0 = +x).
+  function renderRotationSection(n) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const R = 34, C = 45;
+    const sec = el('div', { class: 'panel-section' });
+    sec.appendChild(el('h4', {}, ['Rotation']));
+
+    const hasYaw = () => typeof n.yaw === 'number' && !Number.isNaN(n.yaw);
+    const degVal = () => Math.round(((n.yaw || 0) * 180 / Math.PI) * 10) / 10;
+
+    const wrap = el('div', { style: 'display:flex; align-items:center; gap:14px;' });
+    const dialBox = el('div', {});
+    dialBox.innerHTML =
+      `<svg width="88" height="88" viewBox="0 0 90 90" class="rot-dial" style="touch-action:none; cursor:grab;">
+         <circle cx="${C}" cy="${C}" r="${R}" fill="var(--surface-muted)" stroke="var(--border-strong)"/>
+         <line x1="${C}" y1="${C}" x2="${C + R}" y2="${C}" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" class="dial-needle"/>
+         <circle cx="${C}" cy="${C}" r="3" fill="var(--accent)"/>
+         <circle cx="${C + R}" cy="${C}" r="6" fill="var(--accent)" stroke="#fff" stroke-width="1.5" class="dial-knob"/>
+       </svg>`;
+    const svgEl = dialBox.querySelector('svg');
+    const needle = dialBox.querySelector('.dial-needle');
+    const knob = dialBox.querySelector('.dial-knob');
+    wrap.appendChild(dialBox);
+
+    const right = el('div', { style: 'flex:1;' });
+    const degInput = el('input', { type: 'number', step: '1', value: degVal() });
+    right.appendChild(propRow('Degrees', degInput));
+    const hint = el('div', { class: 'small', style: 'color:var(--text-subtle); font-size:11px; margin-top:2px;' },
+      [hasYaw() ? 'Drag the arrow on the node too.' : 'Not set - drag the dial or node arrow.']);
+    right.appendChild(hint);
+    wrap.appendChild(right);
+    sec.appendChild(wrap);
+
+    function updateDial() {
+      const yaw = n.yaw || 0;
+      const nx = C + R * Math.cos(yaw), ny = C - R * Math.sin(yaw);
+      needle.setAttribute('x2', nx); needle.setAttribute('y2', ny);
+      knob.setAttribute('cx', nx); knob.setAttribute('cy', ny);
+    }
+    updateDial();
+    rotSectionUpdate = () => {
+      updateDial();
+      if (document.activeElement !== degInput) degInput.value = degVal();
+      hint.textContent = hasYaw() ? 'Drag the arrow on the node too.'
+                                  : 'Not set - drag the dial or node arrow.';
+    };
+
+    let dialing = false;
+    function setFromEvent(evt) {
+      const rect = svgEl.getBoundingClientRect();
+      const mx = (evt.clientX - rect.left) * (90 / rect.width);
+      const my = (evt.clientY - rect.top) * (90 / rect.height);
+      n.yaw = Math.atan2(-(my - C), mx - C);
+      updateDial();
+      degInput.value = degVal();
+      redraw();
+    }
+    svgEl.addEventListener('pointerdown', (e) => { e.preventDefault(); dialing = true; svgEl.setPointerCapture(e.pointerId); setFromEvent(e); });
+    svgEl.addEventListener('pointermove', (e) => { if (dialing) setFromEvent(e); });
+    svgEl.addEventListener('pointerup', () => { dialing = false; });
+    svgEl.addEventListener('pointercancel', () => { dialing = false; });
+
+    degInput.addEventListener('input', () => {
+      const d = parseFloat(degInput.value);
+      if (Number.isNaN(d)) return;
+      n.yaw = d * Math.PI / 180;
+      updateDial();
+      redraw();
+    });
+
+    const clearBtn = el('button', { class: 'full-btn subtle', onclick: () => {
+      delete n.yaw;
+      renderPanel(); redraw();
+    }}, ['Clear rotation']);
+    sec.appendChild(clearBtn);
+    return sec;
+  }
+
   function renderNodePanel(n) {
     if (!n) return;
     panelContent.innerHTML = '';
@@ -1285,13 +1542,29 @@
       redraw();
     });
     sec.appendChild(propRow('ID', idInput));
-    sec.appendChild(propRow('Name', textInput(n.name || '', v => { n.name = v; drawNodes(); renderPanel(); })));
+    // The Name field used to call renderPanel() on every keystroke, which rebuilt
+    // the whole panel DOM and destroyed the input being typed into, so the field
+    // lost focus after each character. Update the title text node in place.
+    const nameInput = textInput(n.name || '', v => {
+      n.name = v;
+      titleEl.firstChild.nodeValue = v || ('node ' + n.id);
+      drawNodes();
+    });
+    sec.appendChild(propRow('Name', nameInput));
     sec.appendChild(propRow('Kind', selectInput(['regular','start','goal','waypoint'], n.kind || 'regular', v => {
       n.kind = v === 'regular' ? '' : v; drawNodes();
     })));
-    sec.appendChild(propRow('x (m)', numInput(n.mx, v => { n.mx = v; redraw(); })));
-    sec.appendChild(propRow('y (m)', numInput(n.my, v => { n.my = v; redraw(); })));
+    const xInput = numInput(n.mx, v => { n.mx = v; redraw(); });
+    const yInput = numInput(n.my, v => { n.my = v; redraw(); });
+    sec.appendChild(propRow('x (m)', xInput));
+    sec.appendChild(propRow('y (m)', yInput));
+    nodeCoordsUpdate = () => {
+      if (document.activeElement !== xInput) xInput.value = Math.round(n.mx * 1000) / 1000;
+      if (document.activeElement !== yInput) yInput.value = Math.round(n.my * 1000) / 1000;
+    };
     panelContent.appendChild(sec);
+
+    panelContent.appendChild(renderRotationSection(n));
 
     const sec2 = el('div', { class: 'panel-section' });
     sec2.appendChild(el('h4', {}, ['Connected edges']));
@@ -1488,10 +1761,19 @@
       return;
     }
     const target = evt.target;
+    const rotEl = target.closest('[data-rot-handle]');
     const nodeG = target.closest('[data-node-id]');
     const edgeEl = target.closest('[data-edge-pair]');
 
     if (state.mode === 'select') {
+      if (rotEl) {
+        // grabbing the orientation handle -> rotate the node
+        const id = parseInt(rotEl.dataset.rotHandle);
+        dragState = { type: 'rotate', id };
+        svg.style.cursor = 'grabbing';
+        evt.preventDefault();
+        return;
+      }
       if (nodeG) {
         const id = parseInt(nodeG.dataset.nodeId);
         select('node', id);
@@ -1545,13 +1827,26 @@
         n.mx = mx + dragState.offsetX;
         n.my = my + dragState.offsetY;
         redraw();
-        if (state.selection && state.selection.type === 'node' && state.selection.id === n.id) renderPanel();
+        if (state.selection && state.selection.type === 'node' && state.selection.id === n.id) {
+          if (nodeCoordsUpdate) nodeCoordsUpdate(); else renderPanel();
+        }
+      }
+    }
+    if (dragState && dragState.type === 'rotate') {
+      const [mx, my] = clientToMap(evt);
+      const n = state.nodes.get(dragState.id);
+      if (n) {
+        n.yaw = Math.atan2(my - n.my, mx - n.mx);   // map-frame yaw (rad)
+        redraw();
+        if (state.selection && state.selection.type === 'node' && state.selection.id === n.id) {
+          if (rotSectionUpdate) rotSectionUpdate(); else renderPanel();
+        }
       }
     }
   });
 
   window.addEventListener('mouseup', () => {
-    if (dragState && dragState.type === 'pan') {
+    if (dragState && (dragState.type === 'pan' || dragState.type === 'rotate')) {
       svg.style.cursor = state.mode === 'add-node' ? 'copy' : state.mode === 'add-edge' ? 'crosshair' : 'default';
     }
     dragState = null;
@@ -1560,20 +1855,8 @@
   svg.addEventListener('wheel', (evt) => {
     evt.preventDefault();
     const [vx, vy] = clientToView(evt);
-    const oldZoom = state.zoom;
     const factor = evt.deltaY < 0 ? 1.18 : 0.85;
-    const newZoom = Math.max(0.1, Math.min(8.0, oldZoom * factor));
-    // keep the map point under cursor stationary
-    // before: vx = mx * (PX_PER_M_BASE * oldZoom) - panX
-    // we want: vx = mx * (PX_PER_M_BASE * newZoom) - newPanX
-    // so newPanX = mx * (PX_PER_M_BASE * newZoom) - vx
-    const mx = (vx + state.panX) / (PX_PER_M_BASE * oldZoom);
-    const my = -(vy + state.panY) / (PX_PER_M_BASE * oldZoom);
-    state.zoom = newZoom;
-    state.panX = mx * PX_PER_M_BASE * newZoom - vx;
-    state.panY = -my * PX_PER_M_BASE * newZoom - vy;
-    updateZoomUI();
-    redraw();
+    setZoom(state.zoom * factor, vx, vy);   // keep point under cursor stationary
   }, { passive: false });
 
   // === keyboard ===
@@ -1593,20 +1876,13 @@
 
   document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
-  // === zoom slider ===
-  zoomSlider.addEventListener('input', () => {
-    const oldZoom = state.zoom;
-    const newZoom = parseInt(zoomSlider.value) / 100;
-    // zoom around svg center
-    const cx = VIEW_W / 2, cy = VIEW_H / 2;
-    const mx = (cx + state.panX) / (PX_PER_M_BASE * oldZoom);
-    const my = -(cy + state.panY) / (PX_PER_M_BASE * oldZoom);
-    state.zoom = newZoom;
-    state.panX = mx * PX_PER_M_BASE * newZoom - cx;
-    state.panY = -my * PX_PER_M_BASE * newZoom - cy;
-    updateZoomUI();
-    redraw();
-  });
+  // === view controls ===
+  // In the overlay: the zoom slider. On the canvas: +/- buttons for zoom and a
+  // horizontal slider for panning left/right.
+  zoomSlider.addEventListener('input', () => setZoom(parseInt(zoomSlider.value) / 100));
+  panSlider.addEventListener('input', applyPanSlider);
+  document.getElementById('zoom-in-btn').addEventListener('click', () => setZoom(state.zoom * 1.25));
+  document.getElementById('zoom-out-btn').addEventListener('click', () => setZoom(state.zoom * 0.8));
 
   radiusSlider.addEventListener('input', () => {
     state.nodeRadiusM = parseFloat(radiusSlider.value);
@@ -1720,9 +1996,9 @@
       const p = f.properties || {};
       if (f.geometry.type === 'Point') {
         const [mx, my] = f.geometry.coordinates;
-        state.nodes.set(p.id, {
-          id: p.id, name: p.name || '', kind: p.kind || '', mx, my,
-        });
+        const node = { id: p.id, name: p.name || '', kind: p.kind || '', mx, my };
+        if (typeof p.yaw === 'number' && !Number.isNaN(p.yaw)) node.yaw = p.yaw;
+        state.nodes.set(p.id, node);
         state.nextNodeId = Math.max(state.nextNodeId, p.id + 1);
       } else if (f.geometry.type === 'MultiLineString') {
         state.edges.set(p.id, {
@@ -1836,6 +2112,7 @@
     state.nodes.forEach(n => {
       const props = { frame: 'map', id: n.id, name: n.name || ('node_' + n.id) };
       if (n.kind) props.kind = n.kind;
+      if (typeof n.yaw === 'number' && !Number.isNaN(n.yaw)) props.yaw = Math.round(n.yaw * 1000) / 1000;
       nodeFeatures.push({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [r(n.mx), r(n.my)] },
