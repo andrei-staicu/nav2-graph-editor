@@ -101,7 +101,18 @@ If you already have a `route_graph.geojson` file, click **Import GeoJSON** to lo
 
 The control at the top-left of the canvas has **+** and **&minus;** buttons for zooming around the centre of the view, a horizontal slider for panning left and right, and a live zoom percentage. Mouse scroll still zooms around the cursor, and Shift+drag or middle-click drag still pans freely in both axes.
 
-### 6. Export
+### 6. Fit a graph onto a new map (move / rotate a group)
+
+A graph drawn on one map rarely lines up with a new map of the same place (a new SLAM run, a different robot). Instead of moving every node by hand, press **T** or click **Transform**:
+
+- **Select** with `Ctrl/⌘+A` (all nodes), a drag on empty space (box select, `Alt` adds to it), or `Ctrl/⌘`+click on single nodes.
+- **Move** the group by dragging inside the dashed box, or with the arrow keys (5 cm, `Shift` for 50 cm).
+- **Rotate** it by dragging the **↻** handle above the pivot (`Shift` snaps to 5°), or with `[` and `]` (0.5°, `Shift` for 5°). The pivot is the centre of the selection; **Pivot: click on map** fixes it anywhere, for example on a door frame you can recognise on both maps.
+- **Exact values**: type dx, dy and an angle, then **Apply**. The panel keeps the running total of what was applied, and **Undo all** returns to where you started.
+
+Edges follow their nodes, and every node orientation (`yaw`) rotates with the group, so the graph stays consistent. Transform mode never deletes nodes, even if `Del` is pressed.
+
+### 7. Export
 
 Click **Export GeoJSON**. A file named `graph.geojson` downloads, formatted in the stable layout described below. Drop it into your Nav2 route server config and you're done.
 
@@ -143,6 +154,7 @@ This format is stable across exports, so re-saving an unchanged graph produces a
 | Node types | `regular`, `start`, `goal`, `waypoint`, colour-coded |
 | Node orientation | Per-node yaw, drag the arrow on the node or the dial in the panel, exported as `yaw` |
 | Drag-to-move | Nodes drag smoothly, edges follow |
+| Group move / rotate | Select all or part of the graph, drag, rotate around a pivot or type exact values; orientations rotate too |
 | Zoom / pan | Mouse scroll, on-canvas +/- buttons and pan slider, overlay slider, Shift+drag, middle-click drag |
 | Fit to map / graph | Auto-frame either the map or the graph extent |
 | Round-trip GeoJSON | Import existing graphs, edit, export in the same stable format |
@@ -157,6 +169,10 @@ This format is stable across exports, so re-saving an unchanged graph produces a
 | `N` | Add node mode |
 | `E` | Add edge mode |
 | `V` | Select mode |
+| `T` | Transform mode (move / rotate a group) |
+| `Ctrl/⌘+A` | Select all nodes (transform mode) |
+| Arrows | Move the group 5 cm, `Shift` 50 cm (transform mode) |
+| `[` / `]` | Rotate the group 0.5°, `Shift` 5° (transform mode) |
 | `Del` | Delete selected node or edge |
 | `Esc` | Cancel current action |
 

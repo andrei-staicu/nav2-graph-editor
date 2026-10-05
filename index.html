@@ -556,6 +556,26 @@
   .edge-line.selected { stroke: var(--accent); stroke-width: 2; }
   .edge-hit { stroke: transparent; stroke-width: 16; fill: none; cursor: pointer; }
 
+  /* transform mode: group selection, move and rotate */
+  .grp-sel { fill: none; stroke: var(--accent); stroke-width: 2.5; pointer-events: none; }
+  .grp-bbox { fill: var(--accent); fill-opacity: 0.04; stroke: var(--accent); stroke-width: 1;
+    stroke-dasharray: 4 3; cursor: move; }
+  .grp-box { fill: var(--accent); fill-opacity: 0.08; stroke: var(--accent); stroke-width: 1;
+    stroke-dasharray: 5 4; pointer-events: none; }
+  .grp-pivot { stroke: var(--text); stroke-width: 1.5; pointer-events: none; }
+  .grp-rotline { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
+  .grp-rot { fill: var(--accent); stroke: var(--surface-elevated); stroke-width: 2; cursor: grab; }
+  .grp-rot-icon { fill: var(--surface-elevated); font-size: 12px; font-weight: 700; text-anchor: middle;
+    dominant-baseline: central; pointer-events: none; }
+  .tr-info { font: 11px ui-monospace, Menlo, monospace; color: var(--text-muted); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;
+    white-space: pre; line-height: 1.5; }
+  .btn-row { display: flex; gap: 6px; margin-top: 6px; }
+  .btn-row .full-btn { margin-top: 0; }
+  .full-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  .tr-help { font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+  .tr-help code { font-size: 10px; }
+
   /* per-node orientation (rotation) arrow */
   .rot-line { stroke: var(--accent); stroke-width: 2; fill: none; pointer-events: none; }
   .rot-line.dim { stroke: var(--text-subtle); stroke-width: 1.5; opacity: 0.7; }
@@ -788,6 +808,10 @@
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><circle cx="5" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7 7l10 10"/></svg>
       Add edge
     </button>
+    <button class="mode-btn" data-mode="transform" title="Select several nodes, then move or rotate them together (T)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 3"/><path d="M12 8v8M8 12h8"/></svg>
+      Transform
+    </button>
     <div class="spacer"></div>
     <span class="status-pill" id="status-text">Ready</span>
   </div>
@@ -819,6 +843,7 @@
         <g id="frame-helpers"></g>
         <g id="edges-layer" class="edges-layer"></g>
         <g id="nodes-layer" class="nodes-layer"></g>
+        <g id="group-layer"></g>
       </svg>
       <div class="zoom-ctl">
         <button id="zoom-out-btn" title="Zoom out">&minus;</button>
@@ -860,13 +885,14 @@
     <div class="hint-row">
       <div>
         <strong>Keyboard</strong><br>
-        <code>N</code> add node &nbsp; <code>E</code> add edge &nbsp; <code>V</code> select<br>
+        <code>N</code> add node &nbsp; <code>E</code> add edge &nbsp; <code>V</code> select &nbsp; <code>T</code> transform<br>
         <code>Del</code> remove selection &nbsp; <code>Esc</code> cancel
       </div>
       <div>
         <strong>Mouse</strong><br>
         Drag nodes to move (edges follow).<br>
-        Scroll to zoom &nbsp; <code>Shift</code>+drag or middle-click to pan.
+        Scroll to zoom &nbsp; <code>Shift</code>+drag or middle-click to pan.<br>
+        Transform: <code>Ctrl/⌘+A</code> all, drag to box-select, drag the group to move, drag <code>↻</code> to rotate.
       </div>
     </div>
   </div>
@@ -1225,6 +1251,7 @@
     updateMapImage();
     drawEdges();
     drawNodes();
+    drawGroupOverlay();
     // reverse sync: after panning with the mouse, the slider shows where you are
     if (panSlider) updateZoomUI();
   }
@@ -1385,6 +1412,12 @@
   function renderPanel() {
     nodeCoordsUpdate = null;
     rotSectionUpdate = null;
+    if (state.mode === 'transform') {
+      panelEmpty.style.display = 'none';
+      panelContent.style.display = 'block';
+      renderTransformPanel();
+      return;
+    }
     if (!state.selection) {
       panelEmpty.style.display = 'block';
       panelContent.style.display = 'none';
@@ -1742,12 +1775,289 @@
 
   // === modes ===
   function setMode(m) {
+    const prev = state.mode;
     state.mode = m;
     state.pendingEdgeStart = null;
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
     statusText.textContent = m === 'add-node' ? 'Click on map to add a node' :
-                              m === 'add-edge' ? 'Click first node, then second' : 'Ready';
+                              m === 'add-edge' ? 'Click first node, then second' :
+                              m === 'transform' ? 'Select nodes (Ctrl/⌘+A for all), then drag or rotate' : 'Ready';
     svg.style.cursor = m === 'add-node' ? 'copy' : m === 'add-edge' ? 'crosshair' : 'default';
+    if (m === 'transform' && state.selection) {
+      // carry a selected node over into the group selection
+      if (state.selection.type === 'node') grp.sel.add(state.selection.id);
+      state.selection = null;
+    }
+    if (prev !== m && (m === 'transform' || prev === 'transform')) {
+      grp.pickPivot = false;
+      grp.drag = null;
+      renderPanel();
+      redraw();
+    }
+  }
+
+  // === transform mode: move / rotate a group of nodes ===
+  // Typical use: a graph drawn on one map has to be re-fitted onto a new map of the
+  // same place (new SLAM run, different robot). Select all nodes, then drag and rotate
+  // them until they sit on the new map; edges follow and node orientations rotate too.
+  const grp = {
+    sel: new Set(),
+    pivot: null,        // [mx, my] fixed by the user; null = centre of the selection
+    pickPivot: false,
+    snap: null,         // id -> {mx, my, yaw} before the first transform (for "Undo all")
+    tot: { dx: 0, dy: 0, th: 0 },
+    drag: null,
+  };
+  const groupLayer = document.getElementById('group-layer');
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  function grpNodes() { return [...grp.sel].map(id => state.nodes.get(id)).filter(Boolean); }
+  function grpCentroid() {
+    const ns = grpNodes();
+    if (!ns.length) return null;
+    let x = 0, y = 0;
+    ns.forEach(n => { x += n.mx; y += n.my; });
+    return [x / ns.length, y / ns.length];
+  }
+  function grpPivot() { return grp.pivot || grpCentroid(); }
+  function normAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a <= -Math.PI) a += 2 * Math.PI; return a; }
+  function grpSnapshot() {
+    if (grp.snap) return;
+    grp.snap = new Map();
+    state.nodes.forEach(n => grp.snap.set(n.id, { mx: n.mx, my: n.my, yaw: n.yaw }));
+  }
+  function grpReset() {
+    grp.sel.clear(); grp.pivot = null; grp.pickPivot = false; grp.snap = null;
+    grp.tot = { dx: 0, dy: 0, th: 0 }; grp.drag = null;
+  }
+  function grpTranslate(dx, dy) {
+    if (!grp.sel.size || (!dx && !dy)) return;
+    grpSnapshot();
+    grpNodes().forEach(n => { n.mx += dx; n.my += dy; });
+    if (grp.pivot) grp.pivot = [grp.pivot[0] + dx, grp.pivot[1] + dy];
+    grp.tot.dx += dx; grp.tot.dy += dy;
+    redraw(); grpInfoUpdate();
+  }
+  function grpRotate(th, about) {
+    if (!grp.sel.size || !th) return;
+    grpSnapshot();
+    const [px, py] = about || grpPivot();
+    const c = Math.cos(th), s = Math.sin(th);
+    grpNodes().forEach(n => {
+      const x = n.mx - px, y = n.my - py;
+      n.mx = px + x * c - y * s;
+      n.my = py + x * s + y * c;
+      if (typeof n.yaw === 'number' && !Number.isNaN(n.yaw)) n.yaw = normAngle(n.yaw + th);
+    });
+    grp.tot.th += th;
+    redraw(); grpInfoUpdate();
+  }
+  function grpUndoAll() {
+    if (!grp.snap) return;
+    grp.snap.forEach((v, id) => {
+      const n = state.nodes.get(id);
+      if (!n) return;
+      n.mx = v.mx; n.my = v.my;
+      if (v.yaw === undefined) delete n.yaw; else n.yaw = v.yaw;
+    });
+    grp.snap = null; grp.tot = { dx: 0, dy: 0, th: 0 }; grp.pivot = null;
+    redraw(); grpInfoUpdate();
+  }
+  function grpSelectAll() { state.nodes.forEach(n => grp.sel.add(n.id)); redraw(); grpInfoUpdate(); }
+  function grpBBoxView() {
+    const ns = grpNodes();
+    if (!ns.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ns.forEach(n => {
+      const [vx, vy] = mapToView(n.mx, n.my);
+      x0 = Math.min(x0, vx); y0 = Math.min(y0, vy); x1 = Math.max(x1, vx); y1 = Math.max(y1, vy);
+    });
+    const pad = 18;
+    return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+  }
+  function svgEl(tag, attrs) {
+    const e = document.createElementNS(SVGNS, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+    return e;
+  }
+  function drawGroupOverlay() {
+    groupLayer.innerHTML = '';
+    if (state.mode !== 'transform') return;
+    const bb = grpBBoxView();
+    if (bb) {
+      const r = svgEl('rect', { x: bb[0], y: bb[1], width: bb[2] - bb[0], height: bb[3] - bb[1], class: 'grp-bbox' });
+      r.dataset.grp = 'move';
+      groupLayer.appendChild(r);
+    }
+    const visR = Math.max(4, Math.min(state.nodeRadiusM * pxPerMeter(), 30));
+    grpNodes().forEach(n => {
+      const [vx, vy] = mapToView(n.mx, n.my);
+      groupLayer.appendChild(svgEl('circle', { cx: vx, cy: vy, r: visR + 4, class: 'grp-sel' }));
+    });
+    const p = grpPivot();
+    if (p && grp.sel.size) {
+      const [vx, vy] = mapToView(p[0], p[1]);
+      const hy = vy - 60;      // next to the pivot, so it stays in view when the graph fills the screen
+      groupLayer.appendChild(svgEl('line', { x1: vx, y1: vy, x2: vx, y2: hy, class: 'grp-rotline' }));
+      groupLayer.appendChild(svgEl('line', { x1: vx - 7, y1: vy, x2: vx + 7, y2: vy, class: 'grp-pivot' }));
+      groupLayer.appendChild(svgEl('line', { x1: vx, y1: vy - 7, x2: vx, y2: vy + 7, class: 'grp-pivot' }));
+      const h = svgEl('circle', { cx: vx, cy: hy, r: 10, class: 'grp-rot' });
+      h.dataset.grp = 'rot';
+      groupLayer.appendChild(h);
+      const t = svgEl('text', { x: vx, y: hy, class: 'grp-rot-icon' });
+      t.textContent = '↻';
+      groupLayer.appendChild(t);
+    }
+    if (grp.drag && grp.drag.type === 'box') {
+      const d = grp.drag;
+      groupLayer.appendChild(svgEl('rect', {
+        x: Math.min(d.v0[0], d.v1[0]), y: Math.min(d.v0[1], d.v1[1]),
+        width: Math.abs(d.v1[0] - d.v0[0]), height: Math.abs(d.v1[1] - d.v0[1]), class: 'grp-box' }));
+    }
+  }
+  let grpInfoEl = null;
+  function grpInfoUpdate() {
+    if (!grpInfoEl || state.mode !== 'transform') return;
+    const p = grpPivot();
+    grpInfoEl.textContent =
+      `selected  ${grp.sel.size} / ${state.nodes.size} nodes\n` +
+      `moved     dx ${grp.tot.dx.toFixed(3)} m, dy ${grp.tot.dy.toFixed(3)} m\n` +
+      `rotated   ${(grp.tot.th * 180 / Math.PI).toFixed(2)}°\n` +
+      `pivot     ${p ? p[0].toFixed(2) + ', ' + p[1].toFixed(2) : '-'}${grp.pivot ? ' (fixed)' : ' (centre)'}`;
+  }
+  function renderTransformPanel() {
+    panelContent.innerHTML = '';
+    const sec = el('div', { class: 'panel-section' });
+    const titleEl = el('div', { class: 'node-title' }, ['Transform']);
+    titleEl.appendChild(el('span', { class: 'node-title-sub' }, ['move / rotate a group']));
+    sec.appendChild(titleEl);
+    grpInfoEl = el('div', { class: 'tr-info' });
+    sec.appendChild(grpInfoEl);
+    sec.appendChild(el('div', { class: 'btn-row' }, [
+      el('button', { class: 'full-btn', onclick: grpSelectAll }, ['Select all']),
+      el('button', { class: 'full-btn', onclick: () => { grp.sel.clear(); redraw(); grpInfoUpdate(); } }, ['Select none']),
+    ]));
+    const pickBtn = el('button', { class: 'full-btn' + (grp.pickPivot ? ' active' : ''), onclick: () => {
+      grp.pickPivot = !grp.pickPivot;
+      pickBtn.classList.toggle('active', grp.pickPivot);
+      statusText.textContent = grp.pickPivot ? 'Click on the map to place the pivot' : 'Ready';
+    } }, ['Pivot: click on map']);
+    sec.appendChild(el('div', { class: 'btn-row' }, [
+      pickBtn,
+      el('button', { class: 'full-btn', onclick: () => { grp.pivot = null; redraw(); grpInfoUpdate(); } }, ['Pivot: centre']),
+    ]));
+    panelContent.appendChild(sec);
+
+    const sec2 = el('div', { class: 'panel-section' });
+    sec2.appendChild(el('h4', {}, ['Exact values']));
+    const dxI = el('input', { type: 'number', step: '0.05', value: '0', style: 'min-width: 0; width: 100%' });
+    const dyI = el('input', { type: 'number', step: '0.05', value: '0', style: 'min-width: 0; width: 100%' });
+    const thI = el('input', { type: 'number', step: '0.5', value: '0', style: 'min-width: 0; width: 100%' });
+    sec2.appendChild(propRow('dx (m)', dxI));
+    sec2.appendChild(propRow('dy (m)', dyI));
+    sec2.appendChild(propRow('rotate (°)', thI));
+    sec2.appendChild(el('div', { class: 'btn-row' }, [
+      el('button', { class: 'full-btn', onclick: () => {
+        grpRotate((parseFloat(thI.value) || 0) * Math.PI / 180);
+        grpTranslate(parseFloat(dxI.value) || 0, parseFloat(dyI.value) || 0);
+        dxI.value = 0; dyI.value = 0; thI.value = 0;
+      } }, ['Apply']),
+      el('button', { class: 'danger full-btn', onclick: grpUndoAll }, ['Undo all']),
+    ]));
+    panelContent.appendChild(sec2);
+
+    const sec3 = el('div', { class: 'panel-section tr-help' });
+    sec3.innerHTML =
+      'Click a node to select it, <code>Ctrl/⌘</code>+click to add or remove. ' +
+      'Drag on empty space to box-select (<code>Alt</code> adds). ' +
+      'Drag inside the dashed box to move, drag <code>↻</code> to rotate around the pivot ' +
+      '(<code>Shift</code>: 5° steps).<br>' +
+      'Arrows: 5 cm (<code>Shift</code> 50 cm) &nbsp; <code>[</code> <code>]</code>: 0.5° (<code>Shift</code> 5°).<br>' +
+      'Node orientations rotate with the group. Export when done.';
+    panelContent.appendChild(sec3);
+    grpInfoUpdate();
+  }
+  function grpMouseDown(evt) {
+    const m = clientToMap(evt), v = clientToView(evt);
+    evt.preventDefault();
+    if (grp.pickPivot) {
+      grp.pivot = m; grp.pickPivot = false;
+      statusText.textContent = 'Ready';
+      renderPanel(); redraw();
+      return;
+    }
+    const t = evt.target;
+    const g = t.closest('[data-grp]');
+    const nodeG = t.closest('[data-node-id]');
+    if (g && g.dataset.grp === 'rot') {
+      const p = grpPivot();
+      grp.drag = { type: 'rot', p, a0: Math.atan2(m[1] - p[1], m[0] - p[0]), done: 0 };
+      svg.style.cursor = 'grabbing';
+      return;
+    }
+    if (nodeG) {
+      const id = parseInt(nodeG.dataset.nodeId);
+      if (evt.ctrlKey || evt.metaKey) {
+        if (grp.sel.has(id)) grp.sel.delete(id); else grp.sel.add(id);
+        redraw(); grpInfoUpdate();
+        return;
+      }
+      if (!grp.sel.has(id)) { grp.sel.clear(); grp.sel.add(id); redraw(); grpInfoUpdate(); }
+      grp.drag = { type: 'move', m0: m };
+      return;
+    }
+    if (g && g.dataset.grp === 'move') { grp.drag = { type: 'move', m0: m }; return; }
+    grp.drag = { type: 'box', v0: v, v1: v, add: evt.altKey };
+  }
+  function grpMouseMove(evt) {
+    const d = grp.drag;
+    if (d.type === 'move') {
+      const m = clientToMap(evt);
+      grpTranslate(m[0] - d.m0[0], m[1] - d.m0[1]);
+      d.m0 = m;
+    } else if (d.type === 'rot') {
+      const m = clientToMap(evt);
+      let a = normAngle(Math.atan2(m[1] - d.p[1], m[0] - d.p[0]) - d.a0);
+      if (evt.shiftKey) a = Math.round(a / (5 * Math.PI / 180)) * (5 * Math.PI / 180);
+      grpRotate(normAngle(a - d.done), d.p);
+      d.done = a;
+    } else if (d.type === 'box') {
+      d.v1 = clientToView(evt);
+      drawGroupOverlay();
+    }
+  }
+  function grpMouseUp() {
+    const d = grp.drag;
+    grp.drag = null;
+    svg.style.cursor = 'default';
+    if (!d || d.type !== 'box') return;
+    const x0 = Math.min(d.v0[0], d.v1[0]), x1 = Math.max(d.v0[0], d.v1[0]);
+    const y0 = Math.min(d.v0[1], d.v1[1]), y1 = Math.max(d.v0[1], d.v1[1]);
+    if (!d.add) grp.sel.clear();
+    if (x1 - x0 > 3 || y1 - y0 > 3) {
+      state.nodes.forEach(n => {
+        const [vx, vy] = mapToView(n.mx, n.my);
+        if (vx >= x0 && vx <= x1 && vy >= y0 && vy <= y1) grp.sel.add(n.id);
+      });
+    }
+    redraw(); grpInfoUpdate();
+  }
+  // returns true when the key was used by transform mode
+  function grpKey(evt) {
+    const k = evt.key;
+    const step = evt.shiftKey ? 0.5 : 0.05, ang = (evt.shiftKey ? 5 : 0.5) * Math.PI / 180;
+    if ((k === 'a' || k === 'A') && (evt.ctrlKey || evt.metaKey)) grpSelectAll();
+    else if (k === 'ArrowLeft') grpTranslate(-step, 0);
+    else if (k === 'ArrowRight') grpTranslate(step, 0);
+    else if (k === 'ArrowUp') grpTranslate(0, step);
+    else if (k === 'ArrowDown') grpTranslate(0, -step);
+    else if (k === '[' || k === '{') grpRotate(ang);
+    else if (k === ']' || k === '}') grpRotate(-ang);
+    else if (k === 'Escape') { grp.sel.clear(); grp.pickPivot = false; renderPanel(); redraw(); }
+    else if (k === 'Delete' || k === 'Backspace') { /* never delete nodes from transform mode */ }
+    else if (k === 't' || k === 'T') setMode('select');
+    else return false;
+    return true;
   }
 
   // === interactions ===
@@ -1764,6 +2074,8 @@
     const rotEl = target.closest('[data-rot-handle]');
     const nodeG = target.closest('[data-node-id]');
     const edgeEl = target.closest('[data-edge-pair]');
+
+    if (state.mode === 'transform') { if (evt.button === 0) grpMouseDown(evt); return; }
 
     if (state.mode === 'select') {
       if (rotEl) {
@@ -1813,6 +2125,7 @@
   });
 
   svg.addEventListener('mousemove', (evt) => {
+    if (grp.drag && state.mode === 'transform') { grpMouseMove(evt); return; }
     if (dragState && dragState.type === 'pan') {
       const scale = VIEW_W / svg.clientWidth;
       state.panX = dragState.origPanX - (evt.clientX - dragState.startX) * scale;
@@ -1846,6 +2159,7 @@
   });
 
   window.addEventListener('mouseup', () => {
+    if (grp.drag) grpMouseUp();
     if (dragState && (dragState.type === 'pan' || dragState.type === 'rotate')) {
       svg.style.cursor = state.mode === 'add-node' ? 'copy' : state.mode === 'add-edge' ? 'crosshair' : 'default';
     }
@@ -1862,7 +2176,9 @@
   // === keyboard ===
   window.addEventListener('keydown', (evt) => {
     if (evt.target.tagName === 'INPUT' || evt.target.tagName === 'SELECT' || evt.target.tagName === 'TEXTAREA') return;
-    if (evt.key === 'n' || evt.key === 'N') setMode('add-node');
+    if (state.mode === 'transform' && grpKey(evt)) { evt.preventDefault(); return; }
+    if ((evt.key === 't' || evt.key === 'T') && !evt.ctrlKey && !evt.metaKey) setMode('transform');
+    else if (evt.key === 'n' || evt.key === 'N') setMode('add-node');
     else if (evt.key === 'e' || evt.key === 'E') setMode('add-edge');
     else if (evt.key === 'v' || evt.key === 'V') setMode('select');
     else if (evt.key === 'Escape') { setMode('select'); clearSelection(); }
@@ -1988,6 +2304,7 @@
   });
 
   function importGeoJSON(data) {
+    grpReset();
     state.nodes.clear();
     state.edges.clear();
     state.nextNodeId = 0;
@@ -2181,6 +2498,7 @@
     if (!confirm('Clear all nodes and edges?')) return;
     state.nodes.clear(); state.edges.clear();
     state.nextNodeId = 0; state.nextEdgeId = 10;
+    grpReset();
     clearSelection();
     redraw();
   });
